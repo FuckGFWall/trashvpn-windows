@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.cache/
+**/.cache/
+artifacts/
+runtime/
+*.user
+*.log
+.vs/
+**/.vs/
+engine/*.exe
