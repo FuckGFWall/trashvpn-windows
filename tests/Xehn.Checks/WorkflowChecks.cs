@@ -91,8 +91,8 @@ internal static class WorkflowChecks
         var fake = new FakeEngine(Path.Combine(output, "traffic", Guid.NewGuid().ToString("N"))) { Connected = true, Up = 8192, Down = 4096 };
         using var vm = new MainViewModel(fake, new FakeDesktop(), timeProvider: time);
         vm.RefreshAsync().GetAwaiter().GetResult();
-        time.Advance(2); fake.Up = 0; vm.RefreshAsync().GetAwaiter().GetResult();
-        check(vm.Upload == "" && vm.UploadSeries.HasVisibleTraffic && vm.DownloadSeries.HasVisibleTraffic, "zero upload cannot clear either traffic history");
+        time.Advance(2); fake.Up = fake.Down = 0; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.Upload == "0 KB/s" && vm.Download == "0 KB/s" && vm.UploadSeries.HasVisibleTraffic && vm.DownloadSeries.HasVisibleTraffic, "connected zero upload / download display their values without clearing either traffic history");
         time.Advance(2); fake.FailTraffic = true; vm.RefreshAsync().GetAwaiter().GetResult();
         check(vm.UploadSeries.Snapshot().Length == 2 && vm.UploadSeries.HasVisibleTraffic, "transient traffic API errors preserve history without fabricating a zero sample");
         fake.Connected = false; fake.FailTraffic = false; time.Advance(2); vm.RefreshAsync().GetAwaiter().GetResult();
@@ -138,6 +138,7 @@ internal static class WorkflowChecks
         using var model = new MainViewModel(network, new FakeDesktop(), resources);
         model.InitializeResourcesAsync().GetAwaiter().GetResult();
         check(model.AppVersion == "1.0.0" && model.GeoNeedsDownload && model.GeoUpdated == "2026-10-20", "resource initialization reports version and old GeoFiles date");
+        check(model.GeoResourceMessage.Contains("检查完成") && model.GeoResourceMessage.Contains("下载更新"), "missing / stale GeoFiles check explains the required update in its card");
         network.Connected = true; network.Verification = "checking"; model.RefreshAsync().GetAwaiter().GetResult();
         check(resources.Calls.Count == 1, "automatic GeoFiles never download before verified VPN");
         network.Verification = "verified"; model.RefreshAsync().GetAwaiter().GetResult();
@@ -154,8 +155,13 @@ internal static class WorkflowChecks
         check(model.GeoResourceMessage.Contains("替换成功"), "GeoFiles card confirms actual replacement after disconnect");
         model.RunResourceActionAsync("resources-check-core").GetAwaiter().GetResult();
         check(model.CoreNeedsDownload && model.CoreCheckText.Contains("不支持"), "unsupported protocol check exposes core download action");
+        check(model.CoreResourceSuccessText == "" && model.CoreResourceDetail.Contains("不支持"), "unsupported-core result cannot retain a stale inline success label");
         model.RunResourceActionAsync("resources-info").GetAwaiter().GetResult();
         check(model.CoreNeedsDownload, "GeoFiles inspection cannot erase an unsupported-core verdict");
+        check(model.GeoResourceMessage.Contains("检查通过") && model.GeoResourceMessage.Contains("无需更新"), "successful GeoFiles check gives an explicit card-level confirmation");
+        resources.FailInfo = true; model.RunResourceActionAsync("resources-info").GetAwaiter().GetResult();
+        check(model.GeoResourceMessage.Contains("检查未完成") && !model.GeoResourceMessage.Contains("检查通过"), "failed GeoFiles check replaces any stale successful-check message");
+        resources.FailInfo = false;
         network.Connected = true; model.RefreshAsync().GetAwaiter().GetResult(); var count = resources.Calls.Count;
         model.RunResourceActionAsync("resources-download-core").GetAwaiter().GetResult();
         check(resources.Calls.Count == count, "core download cannot overwrite a running connection");
@@ -167,6 +173,8 @@ internal static class WorkflowChecks
         resources.CompleteCoreDownload(); PumpUntil(() => coreDownload.IsCompleted);
         check(model.CoreVersion == "9.0.0" && !model.CoreNeedsDownload, "validated core install refreshes displayed version");
         check(model.CoreResourceMessage.Contains("成功") && !model.CoreDownloadActive, "core card confirms successful install / replacement");
+        resources.CoreSupported = true; model.RunResourceActionAsync("resources-check-core").GetAwaiter().GetResult();
+        check(model.CoreResourceSuccessText == "检查通过" && model.CoreResourceDetail == "", "successful core inspection also appears only inline with its buttons");
 
         var retryEngine = NewEngine(); var retryResources = new FakeResources { FailDownload = true };
         using var retry = new MainViewModel(retryEngine, new FakeDesktop(), retryResources);
@@ -208,6 +216,8 @@ internal static class WorkflowChecks
         public bool FailDownload;
         public bool HoldCoreDownload;
         public bool FailApply;
+        public bool FailInfo;
+        public bool CoreSupported;
         private ResourceInfo current = new("1.19.32", false, "", "2026-10-20", true, false);
         private TaskCompletionSource<ResourceInfo>? download;
         private TaskCompletionSource<ResourceInfo>? coreDownload;
@@ -216,7 +226,8 @@ internal static class WorkflowChecks
         {
             progress = onProgress;
             Calls.Add(command);
-            if (command == "resources-check-core") return Task.FromResult(current with { CoreNeedsDownload = true, CoreCheck = "不支持 fixture 协议" });
+            if (command == "resources-info" && FailInfo) return Task.FromException<ResourceInfo>(new IOException("fixture inspection failure"));
+            if (command == "resources-check-core") return Task.FromResult(current with { CoreNeedsDownload = !CoreSupported, CoreCheck = CoreSupported ? "全部协议检查通过" : "不支持 fixture 协议" });
             if (command == "resources-download-core") { if (HoldCoreDownload) { coreDownload = new(TaskCreationOptions.RunContinuationsAsynchronously); return coreDownload.Task; } current = current with { CoreVersion = "9.0.0", CoreNeedsDownload = false }; return Task.FromResult(current); }
             if (command == "resources-apply") { if (FailApply) return Task.FromException<ResourceInfo>(new IOException("fixture replacement failure")); current = current with { GeoPending = false, GeoUpdated = "2026-10-30", GeoNeedsDownload = false }; onProgress?.Invoke(new("geo", "installed", "", 1, 1)); return Task.FromResult(current); }
             if (command.Contains("download-geo"))
@@ -290,8 +301,16 @@ internal static class WorkflowChecks
         runningVm.RefreshAsync().GetAwaiter().GetResult();
         var shutdown = runningVm.ShutdownAsync();
         check(running.Last.Command == "desktop-disconnect" && !runningVm.CanToggleFromTray, "explicit exit disconnects active VPN instead of hiding");
+        check(!shutdown.IsCompleted, "application exit cannot finish before engine disconnect completes");
         running.Connected = false; running.Complete(); PumpUntil(() => shutdown.IsCompleted);
         check(shutdown.Result && !runningVm.IsConnected, "exit waits for disconnect and state cleanup");
+
+        var lingering = NewEngine(); lingering.Connected = true;
+        using var lingeringVm = new MainViewModel(lingering, new FakeDesktop());
+        var lingeringExit = lingeringVm.ShutdownAsync(); lingering.Complete(); PumpUntil(() => lingeringExit.IsCompleted);
+        check(!lingeringExit.Result && lingeringVm.Notice.Contains("仍处于连接状态"), "exit refuses to close when disconnect returns without clearing the actual session");
+        var lingeringRetry = lingeringVm.ShutdownAsync(); lingering.Connected = false; lingering.Complete(); PumpUntil(() => lingeringRetry.IsCompleted);
+        check(lingeringRetry.Result, "exit may finish only after the lingering session is truly cleared");
 
         var pending = NewEngine(); using var pendingVm = new MainViewModel(pending, new FakeDesktop());
         pendingVm.InitializePreparation(); var connection = pendingVm.ToggleAsync();

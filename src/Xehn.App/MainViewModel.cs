@@ -32,6 +32,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool GeoDownloadIndeterminate { get; private set; }
     public string CoreResourceMessage { get; private set; } = "";
     public string GeoResourceMessage { get; private set; } = "";
+    public string CoreResourceSuccessText => CoreResourceMessage.Contains("成功", StringComparison.Ordinal) ? "安装 / 替换成功" : CoreResourceMessage.Contains("检查通过", StringComparison.Ordinal) || CoreResourceMessage.Length == 0 && CoreCheckText == "全部协议检查通过" ? "检查通过" : "";
+    public string GeoResourceSuccessText => GeoResourceMessage.Contains("替换成功", StringComparison.Ordinal) ? "替换成功" : GeoResourceMessage.Contains("检查通过", StringComparison.Ordinal) ? "检查通过，无需更新" : "";
+    public string CoreResourceDetail => CoreResourceSuccessText.Length > 0 ? "" : CoreResourceMessage.Length > 0 ? CoreResourceMessage : CoreCheckText;
+    public string GeoResourceDetail => GeoResourceSuccessText.Length == 0 ? GeoResourceMessage : "";
     public bool CanCheckResources => !disposed && !resourcesBusy && !exiting;
     public bool CanDownloadCore => CanCheckResources && !IsBusy && !connected && !connecting;
     public bool CanDownloadGeo => CanCheckResources && !preparing && !engineConnecting && !switchingModes && !busy;
@@ -369,7 +373,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             connecting = false; cancelling = false; SetBusy(false);
             RegistrationIndeterminate = ScanIndeterminate = false;
             await RefreshAsync(); Changed("");
-            if (disconnect && resourcesReady && !cleanupFailed && !exiting) await RunResourceActionAsync("resources-info");
+            if (disconnect && resourcesReady && !cleanupFailed && !exiting) await RunResourceActionAsync("resources-info", showCheckResult: false);
         }
     }
     public async Task RefreshAsync()
@@ -439,10 +443,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RunResourceActionAsync("resources-info");
         resourcesReady = true;
     }
-    public Task RunResourceActionAsync(string command)
+    public Task RunResourceActionAsync(string command, bool showCheckResult = true)
     {
         if (!CanCheckResources || command == "resources-download-core" && !CanDownloadCore || command == "resources-download-geo" && !CanDownloadGeo) return Task.CompletedTask;
-        return resourceOperation = ResourceActionCoreAsync(command, automatic: false);
+        return resourceOperation = ResourceActionCoreAsync(command, automatic: false, showCheckResult);
     }
     private void UpdateResourceInfo(ResourceInfo info, bool updateCore)
     {
@@ -450,12 +454,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         GeoUpdated = info.GeoUpdated.Length > 0 ? info.GeoUpdated : "尚未更新";
         GeoNeedsDownload = info.GeoNeedsDownload; GeoPending = info.GeoPending; Changed("");
     }
-    private async Task ResourceActionCoreAsync(string command, bool automatic)
+    private async Task ResourceActionCoreAsync(string command, bool automatic, bool showCheckResult = false)
     {
         resourcesBusy = true;
         resourcesInstalling = command is "resources-download-core" or "resources-apply" || command == "resources-download-geo" && !connected;
         var coreDownload = command == "resources-download-core";
+        var coreCheck = command == "resources-check-core";
         var geoDownload = command.Contains("download-geo", StringComparison.Ordinal);
+        var geoCheck = command == "resources-info" && showCheckResult;
+        if (geoCheck) GeoResourceMessage = "正在检查 GeoFiles…";
+        if (coreCheck) CoreResourceMessage = "正在检查 mihomo…";
         if (!automatic) Notice = "";
         if (coreDownload) { CoreDownloadActive = CoreDownloadIndeterminate = true; CoreDownloadProgress = 0; CoreResourceMessage = "正在获取内核下载信息…"; }
         if (geoDownload) { GeoDownloadActive = GeoDownloadIndeterminate = true; GeoDownloadProgress = 0; GeoResourceMessage = "正在下载 GeoFiles…"; }
@@ -464,11 +472,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var info = await resources.RunAsync(command, Log, HandleResourceProgress);
             var applyFailed = false;
+            var appliedGeo = false;
             if (!connected && info.GeoPending && !exiting && !preparing && !busy && !switchingModes)
             {
                 resourcesInstalling = true; Changed("");
                 await workflow.WaitAsync();
-                try { var applied = await resources.RunAsync("resources-apply", Log, HandleResourceProgress); info = applied with { CoreVersion = info.CoreVersion, CoreNeedsDownload = info.CoreNeedsDownload, CoreCheck = info.CoreCheck }; }
+                try { var applied = await resources.RunAsync("resources-apply", Log, HandleResourceProgress); info = applied with { CoreVersion = info.CoreVersion, CoreNeedsDownload = info.CoreNeedsDownload, CoreCheck = info.CoreCheck }; appliedGeo = !info.GeoPending; }
                 catch (Exception e)
                 {
                     applyFailed = true; Log("GeoFiles 替换：" + e.Message);
@@ -479,10 +488,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             UpdateResourceInfo(info, command is "resources-check-core" or "resources-download-core" || command == "resources-info" && !resourcesReady);
             if (coreDownload) CoreResourceMessage = $"mihomo 安装 / 替换成功（{info.CoreVersion}）。";
+            if (coreCheck) CoreResourceMessage = info.CoreNeedsDownload ? info.CoreCheck : "mihomo 检查通过，支持全部协议。";
+            if (geoCheck && !applyFailed && !appliedGeo && !info.GeoPending)
+                GeoResourceMessage = info.GeoNeedsDownload ? "检查完成：GeoFiles 缺失、不完整或已超过 7 天，请下载更新。" : "GeoFiles 检查通过：文件齐全，未超过 7 天，无需更新。";
             if (info.GeoPending && !applyFailed) { GeoResourceMessage = "下载完成，等待 VPN 断开后替换。"; Notice = "GeoFiles 已下载，将在本次 VPN 断开后替换。"; }
             else if (!automatic && !applyFailed) Notice = command == "resources-info" ? Notice : "检查 / 下载完成。";
         }
-        catch (Exception e) { Log("资源操作：" + e.Message); if (coreDownload) CoreResourceMessage = "内核下载 / 替换未完成，请重试。"; if (geoDownload) GeoResourceMessage = "GeoFiles 下载未完成，请重试。"; if (command == "resources-apply") GeoResourceMessage = "GeoFiles 已下载，但替换未完成，请重试。"; if (!exiting) Notice = "资源检查 / 下载未完成：" + e.Message; }
+        catch (Exception e) { Log("资源操作：" + e.Message); if (coreDownload) CoreResourceMessage = "内核下载 / 替换未完成，请重试。"; if (coreCheck) CoreResourceMessage = "mihomo 检查未完成，请重试；详情见日志。"; if (geoDownload) GeoResourceMessage = "GeoFiles 下载未完成，请重试。"; if (geoCheck) GeoResourceMessage = "GeoFiles 检查未完成，请重试；详情见日志。"; if (command == "resources-apply") GeoResourceMessage = "GeoFiles 已下载，但替换未完成，请重试。"; if (!exiting) Notice = "资源检查 / 下载未完成：" + e.Message; }
         finally { resourcesBusy = resourcesInstalling = false; if (coreDownload) CoreDownloadActive = CoreDownloadIndeterminate = false; if (geoDownload) GeoDownloadActive = GeoDownloadIndeterminate = false; Changed(""); }
     }
     private void HandleResourceProgress(ResourceProgress progress)
@@ -554,6 +566,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 finally { SetBusy(false); }
             }
             connected = (await engine.ReadSessionAsync()).Connected;
+            if (connected) Notice = "退出清理未完成：VPN 仍处于连接状态，请重试退出。";
             return !connected && !busy && !cleanupFailed;
         }
         catch (Exception e) { Notice = "退出清理失败：" + e.Message; return false; }

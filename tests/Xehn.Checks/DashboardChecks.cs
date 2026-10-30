@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Xehn.App;
 
@@ -18,7 +19,17 @@ internal static class DashboardChecks
     {
         var time = new ManualTimeProvider(); var series = new TrafficSeries(time);
         series.Add(0);
-        check(!series.HasVisibleTraffic && TrafficChart.Project(series, 0, 300, 42).Length == 0, "empty / all-zero history has no placeholder curve");
+        check(!series.HasVisibleTraffic && TrafficChart.Project(series, 0, 300, 42).Length == 0, "all-zero history invents no traffic peaks or animation");
+        void CheckBaseline(TrafficSeries? data, string name)
+        {
+            var idle = new TrafficChart { Width = 200, Height = 42, Series = data };
+            idle.Measure(new Size(200, 42)); idle.Arrange(new Rect(0, 0, 200, 42)); idle.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(200, 42, 96, 96, PixelFormats.Pbgra32); bitmap.Render(idle);
+            var pixels = new byte[200 * 42 * 4]; bitmap.CopyPixels(pixels, 200 * 4, 0);
+            check(Enumerable.Range(0, 200).All(x => pixels[(40 * 200 + x) * 4 + 3] > 0) && Enumerable.Range(0, 200).All(x => pixels[(10 * 200 + x) * 4 + 3] == 0), name);
+        }
+        CheckBaseline(null, "new chart always draws a full-width horizontal zero baseline");
+        CheckBaseline(series, "measured zero traffic keeps the horizontal baseline visible");
         time.Advance(2); series.Add(8192); time.Advance(2); series.Add(0);
         check(series.Snapshot().Length == 3 && series.HasVisibleTraffic, "a measured zero preserves preceding traffic instead of clearing it");
         var before = TrafficChart.Project(series, series.NowSeconds, 300, 42);
@@ -29,6 +40,7 @@ internal static class DashboardChecks
         check(series.HasVisibleTraffic, "old traffic remains visible inside the disconnected time window");
         time.Advance(25);
         check(!series.HasVisibleTraffic && series.Snapshot().Length == 0, "history expires only after leaving the real 90-second window");
+        CheckBaseline(series, "expired / disconnected traffic returns to the same continuous zero line");
         series.Add(double.NaN); time.Advance(1); series.Add(-5); time.Advance(1); series.Add(double.PositiveInfinity);
         check(series.Snapshot().All(p => p.Value == 0), "invalid and negative counters cannot produce broken geometry");
 

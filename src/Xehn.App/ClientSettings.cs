@@ -54,5 +54,5 @@ public sealed class ClientSettings
         File.WriteAllText(temporary, JsonSerializer.Serialize(this, JsonOptions));
         File.Move(temporary, path, true);
     }
-    public static string Speed(double? bytes) => bytes is null or <= 0 ? "" : bytes >= 1048576 ? $"{bytes / 1048576:0.00} MB/s" : bytes >= 1024 ? $"{bytes / 1024:0.0} KB/s" : $"{bytes:0} B/s";
+    public static string Speed(double? bytes) => bytes is null || !double.IsFinite(bytes.Value) || bytes < 0 ? "" : bytes == 0 ? "0 KB/s" : bytes >= 1048576 ? $"{bytes / 1048576:0.00} MB/s" : bytes >= 1024 ? $"{bytes / 1024:0.0} KB/s" : $"{bytes:0} B/s";
 }

@@ -91,12 +91,14 @@ public sealed class TrafficChart : FrameworkElement
     }
     protected override void OnRender(DrawingContext dc)
     {
-        if (Series == null) return;
-        var points = Project(Series, Series.NowSeconds, ActualWidth, ActualHeight);
-        if (points.Length == 0) return;
+        if (ActualWidth <= 0 || ActualHeight <= 4) return;
         dc.PushClip(new RectangleGeometry(new Rect(RenderSize)));
+        // Keep the zero level visible even before the first sample or after
+        // the last retained sample has left the time window.
+        dc.DrawLine(new Pen(Stroke, 1.2), new Point(0, ActualHeight - 2), new Point(ActualWidth, ActualHeight - 2));
+        var points = Series == null ? [] : Project(Series, Series.NowSeconds, ActualWidth, ActualHeight);
         if (points.Length == 1) dc.DrawEllipse(Stroke, null, points[0], 1, 1);
-        else dc.DrawGeometry(null, new Pen(Stroke, 1.8) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round }, SmoothCurve(points));
+        else if (points.Length > 1) dc.DrawGeometry(null, new Pen(Stroke, 1.8) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round }, SmoothCurve(points));
         dc.Pop();
     }
 }
