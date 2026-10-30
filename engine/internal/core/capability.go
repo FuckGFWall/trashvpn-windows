@@ -1,12 +1,14 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var versionRe = regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
@@ -15,7 +17,12 @@ var versionRe = regexp.MustCompile(`v?(\d+\.\d+\.\d+)`)
 // ("1.19.32"). It works for both official releases ("Mihomo Meta v1.19.32 …")
 // and older/forked builds that print no "v" prefix.
 func BinaryVersion(bin string) (string, error) {
-	cmd := exec.Command(bin, "-v")
+	return BinaryVersionContext(context.Background(), bin)
+}
+func BinaryVersionContext(parent context.Context, bin string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-v")
 	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -55,6 +62,11 @@ func TestConfig(bin, workDir string, configYAML []byte) error {
 // core directory can be read-only (Program Files), can be watched by security
 // software, and is not ours to litter with probe files.
 func TestConfigDetail(bin, workDir string, configYAML []byte) (ok, ran bool, err error) {
+	return TestConfigDetailContext(context.Background(), bin, workDir, configYAML)
+}
+func TestConfigDetailContext(parent context.Context, bin, workDir string, configYAML []byte) (ok, ran bool, err error) {
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return false, false, err
 	}
@@ -68,9 +80,12 @@ func TestConfigDetail(bin, workDir string, configYAML []byte) (ok, ran bool, err
 		return false, false, werr
 	}
 
-	cmd := exec.Command(bin, "-t", "-d", workDir, "-f", probe)
+	cmd := exec.CommandContext(ctx, bin, "-t", "-d", workDir, "-f", probe)
 	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return false, true, fmt.Errorf("内核配置检查超时或已取消: %w", ctx.Err())
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if i := strings.LastIndex(msg, "\n"); i >= 0 {

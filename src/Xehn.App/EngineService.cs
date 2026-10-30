@@ -81,7 +81,7 @@ public sealed class EngineService : IEngineService
             catch (InvalidOperationException) { }
             catch (System.ComponentModel.Win32Exception) { }
         }
-        return new(alive, Text("exit_ip"), Text("country"), Text("colo"), Number("latency_ms"), Text("started_at"), Number("api_port"), Text("proxy_warn"));
+        return new(alive, Text("exit_ip"), Text("country"), Text("colo"), Number("latency_ms"), Text("started_at"), Number("api_port"), Text("proxy_warn"), Text("verification"));
     }
     public async Task<(double Up, double Down)> TrafficAsync(int port)
     {
@@ -95,4 +95,4 @@ public sealed class EngineService : IEngineService
     }
     public void Dispose() => http.Dispose();
 }
-public sealed record Session(bool Connected = false, string ExitIp = "", string Country = "", string Colo = "", int Latency = 0, string Started = "", int ApiPort = 9090, string ProxyWarning = "");
+public sealed record Session(bool Connected = false, string ExitIp = "", string Country = "", string Colo = "", int Latency = 0, string Started = "", int ApiPort = 9090, string ProxyWarning = "", string Verification = "verified");

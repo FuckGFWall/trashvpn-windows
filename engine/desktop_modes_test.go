@@ -43,7 +43,7 @@ func TestDesktopModeConfigPreservesNodeAndChain(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(after)
-			if !strings.Contains(text, nodes) || !strings.Contains(text, "mixed-port: 17891") || !strings.Contains(text, "external-controller: 127.0.0.1:19090") {
+			if !strings.Contains(text, nodes) || !strings.Contains(text, "mixed-port: 17891") || !strings.Contains(text, "external-controller: 127.0.0.1:19090") || !strings.Contains(text, "geo-auto-update: false") {
 				t.Fatal("node/chain/controller changed")
 			}
 			if strings.Contains(text, "enable: true\n  stack: gvisor") != tun {

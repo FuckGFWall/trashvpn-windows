@@ -10,6 +10,31 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly ClientSettings settings;
     private readonly IEngineService engine;
     private readonly IDesktopIntegration desktop;
+    private readonly IResourceService resources;
+    private bool resourcesReady, resourcesBusy, resourcesInstalling;
+    private Task resourceOperation = Task.CompletedTask;
+    private string autoGeoSession = "";
+    private string inspectedGeoSession = "";
+    private DateTimeOffset nextGeoInspection = DateTimeOffset.MinValue;
+    public Task ResourceOperation => resourceOperation;
+    public string AppVersion => "1.0.0";
+    public string CoreVersion { get; private set; } = "尚未检查";
+    public string CoreCheckText { get; private set; } = "";
+    public string GeoUpdated { get; private set; } = "尚未更新";
+    public bool CoreNeedsDownload { get; private set; }
+    public bool GeoNeedsDownload { get; private set; }
+    public bool GeoPending { get; private set; }
+    public bool CoreDownloadActive { get; private set; }
+    public bool GeoDownloadActive { get; private set; }
+    public double CoreDownloadProgress { get; private set; }
+    public double GeoDownloadProgress { get; private set; }
+    public bool CoreDownloadIndeterminate { get; private set; }
+    public bool GeoDownloadIndeterminate { get; private set; }
+    public string CoreResourceMessage { get; private set; } = "";
+    public string GeoResourceMessage { get; private set; } = "";
+    public bool CanCheckResources => !disposed && !resourcesBusy && !exiting;
+    public bool CanDownloadCore => CanCheckResources && !IsBusy && !connected && !connecting;
+    public bool CanDownloadGeo => CanCheckResources && !preparing && !engineConnecting && !switchingModes && !busy;
     private readonly SemaphoreSlim workflow = new(1, 1);
     private Task<bool>? preparation;
     private int generation;
@@ -22,7 +47,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public Task ModeChangeTask { get; private set; } = Task.CompletedTask;
     public bool IsPreparing => preparing;
     public bool ConnectionRequested => connecting;
-    public bool CanChangeProtocol => !cleanupFailed && !switchingModes && !exiting && (!busy || preparing) && !connected && !engineConnecting && settingsReadable;
+    public bool CanChangeProtocol => !resourcesInstalling && !cleanupFailed && !switchingModes && !exiting && (!busy || preparing) && !connected && !engineConnecting && settingsReadable;
     public string RegistrationText { get; private set; } = "注册 · 待检查";
     public string ScanText { get; private set; } = "优选 · 待检查";
     public double RegistrationProgress { get; private set; }
@@ -36,9 +61,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string Home => engine.Home;
     public bool IsBusy => busy || preparing || switchingModes;
     public bool IsConnected => connected;
-    public bool CanConfigure => !cleanupFailed && !switchingModes && !exiting && (!busy || preparing) && !connected && settingsReadable;
-    public bool CanChangeModes => !cleanupFailed && !busy && !switchingModes && !exiting && settingsReadable;
-    public bool CanToggleFromTray => !busy && !connecting && !switchingModes && !exiting && settingsReadable;
+    public bool CanConfigure => !resourcesInstalling && !cleanupFailed && !switchingModes && !exiting && (!busy || preparing) && !connected && settingsReadable;
+    public bool CanChangeModes => !resourcesInstalling && !cleanupFailed && !busy && !switchingModes && !exiting && settingsReadable;
+    public bool CanToggleFromTray => !resourcesInstalling && !busy && !connecting && !switchingModes && !exiting && settingsReadable;
     public string TrayConnectionLabel => connecting ? "正在连接 VPN…" : connected || cleanupFailed ? "关闭 VPN" : "连接 VPN";
     public string Status { get => status; private set { status = value; Changed(); } }
     public string PowerLabel => connecting ? "取消连接" : cleanupFailed ? "重试清理连接" : connected ? "断开连接" : "连接 WARP";
@@ -91,11 +116,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool TunSelected { get => settings.CaptureMode == "tun"; set { if (value) RequestModes("tun", settings.ProxyMode); } }
     public bool GlobalSelected { get => settings.ProxyMode == "global"; set { if (value) RequestModes(settings.CaptureMode, "global"); } }
     public bool SplitSelected { get => settings.ProxyMode == "bypass"; set { if (value) RequestModes(settings.CaptureMode, "bypass"); } }
-    public MainViewModel(IEngineService? service = null, IDesktopIntegration? integration = null)
+    public MainViewModel(IEngineService? service = null, IDesktopIntegration? integration = null, IResourceService? resourceService = null)
     {
         // Never share the installed client's account, state, or core process.
         engine = service ?? new EngineService(Path.Combine(AppContext.BaseDirectory, "data"));
         desktop = integration ?? new DesktopIntegration();
+        resources = resourceService ?? new ResourceService(engine.Home);
         try { settings = ClientSettings.Load(Home); }
         catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
         { settings = new(); settingsReadable = false; Notice = "无法读取设置，已禁止连接以保护原文件：" + e.Message; }
@@ -117,6 +143,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var restartSettingsSaved = false;
         try
         {
+            await StopResourceWorkAsync();
             var snapshot = JsonSerializer.Deserialize<ClientSettings>(SettingsJson(), ClientSettings.JsonOptions)!;
             snapshot.CaptureMode = capture; snapshot.ProxyMode = route;
             var error = snapshot.Validate();
@@ -132,7 +159,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     if (connected || cleanupFailed)
                     {
                         cleanupFailed = true;
-                        await engine.RunAsync("disconnect", Log);
+                        await engine.RunAsync("desktop-disconnect", Log);
                         cleanupFailed = false;
                         connected = (await engine.ReadSessionAsync()).Connected;
                         if (connected) { Notice = "旧连接未断开，已取消重启。"; return false; }
@@ -145,9 +172,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             if (connected)
             {
-                Status = "正在切换模式";
+                if (settings.VerifyBeforeConnect) connected = false;
+                Status = "正在切换模式，等待真实连接验证"; Changed("");
                 await workflow.WaitAsync();
-                try { await engine.RunAsync("desktop-modes", Log, JsonSerializer.Serialize(snapshot, ClientSettings.JsonOptions)); }
+                try { await engine.RunAsync("desktop-modes", line => HandleEngineLine(line, generation), JsonSerializer.Serialize(snapshot, ClientSettings.JsonOptions)); }
                 finally { workflow.Release(); }
                 applied = true;
             }
@@ -238,6 +266,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Application.Current.Dispatcher.Invoke(() =>
         {
             if (version != generation || disposed) return;
+            if (line.StartsWith("@@RESOURCE_PROGRESS ", StringComparison.Ordinal))
+            { var progress = JsonSerializer.Deserialize<ResourceProgress>(line[20..], ClientSettings.JsonOptions); if (progress != null) HandleResourceProgress(progress); return; }
             if (!line.StartsWith("@@XEHN ", StringComparison.Ordinal)) { Log(line); return; }
             try
             {
@@ -247,7 +277,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     var value = root.GetProperty("state").GetString();
                     if (cancelling && value != "disconnected") return;
                     connected = value is "provisional" or "verified";
-                    Status = value == "provisional" ? "已连接（检测中）" : connected ? "已连接" : "未连接";
+                    Status = value == "provisional" ? "已连接（检测中）" : value == "verifying" ? "正在验证真实连接" : connected ? "已连接" : "未连接";
                 }
                 else
                 {
@@ -272,6 +302,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     }
     private async Task ToggleCoreAsync()
     {
+        if (disposed) return;
         if (connecting)
         {
             if (cancelling) return;
@@ -281,7 +312,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             try { await engine.CancelAsync(); } catch (Exception e) { Notice = e.Message; }
             return;
         }
-        if (busy || switchingModes || exiting || !settingsReadable) return;
+        if (resourcesInstalling || busy || switchingModes || exiting || !settingsReadable) return;
         var disconnect = connected || cleanupFailed;
         if (!disconnect && !Save()) return;
         if (!disconnect && TunSelected)
@@ -298,6 +329,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         connecting = !disconnect; SetBusy(true); Notice = ""; Status = disconnect ? "正在断开" : "正在连接";
         try
         {
+            if (disconnect) await StopResourceWorkAsync();
             if (!disconnect)
             {
                 if (!prepared && preparation?.IsCompleted != false) StartPreparation();
@@ -319,7 +351,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 if (!disconnect && !Save()) throw new IOException("设置无效，未启动连接。");
                 engineConnecting = !disconnect; Changed("");
                 var version = generation;
-                await engine.RunAsync(disconnect ? "disconnect" : "desktop-connect", line => HandleEngineLine(line, version), SettingsJson(), prepared: !disconnect);
+                await engine.RunAsync(disconnect ? "desktop-disconnect" : "desktop-connect", line => HandleEngineLine(line, version), SettingsJson(), prepared: !disconnect);
                 if (disconnect) cleanupFailed = false;
             }
             finally { engineConnecting = false; workflow.Release(); }
@@ -330,6 +362,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             connecting = false; cancelling = false; SetBusy(false);
             RegistrationIndeterminate = ScanIndeterminate = false;
             await RefreshAsync(); Changed("");
+            if (disconnect && resourcesReady && !cleanupFailed && !exiting) await RunResourceActionAsync("resources-info");
         }
     }
     public async Task RefreshAsync()
@@ -343,7 +376,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var state = await engine.ReadSessionAsync();
             // A connect or protocol switch may have begun while disk IO was pending.
             if (busy || switchingModes || disposed || version != generation || revision != sessionRevision) return;
-            connected = state.Connected; Status = connected ? "已连接" : "未连接";
+            connected = state.Connected;
+            if (connected && state.Verification == "failed") cleanupFailed = true;
+            Status = connected ? state.Verification == "failed" ? "连接异常，请断开后重试" : state.Verification == "checking" ? "已连接（检测中）" : "已连接" : "未连接";
             ExitIp = connected ? state.ExitIp : "";
             Region = connected ? string.Join(" · ", new[] { state.Country, state.Colo }.Where(s => s.Length > 0)) : "";
             Latency = connected && state.Latency > 0 ? $"{state.Latency} ms" : "";
@@ -364,12 +399,103 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             }
             else ClearTraffic();
             Changed("");
+            if (resourcesReady && !connected && GeoPending && !resourcesBusy)
+                resourceOperation = ResourceActionCoreAsync("resources-apply", automatic: true);
+            var resourceSession = state.Started.Length > 0 ? state.Started : "current";
+            if (resourcesReady && connected && state.Verification == "verified" && !resourcesBusy &&
+                (inspectedGeoSession != resourceSession || DateTimeOffset.UtcNow >= nextGeoInspection))
+            {
+                inspectedGeoSession = resourceSession; nextGeoInspection = DateTimeOffset.UtcNow.AddHours(1);
+                autoGeoSession = "";
+                resourceOperation = ResourceActionCoreAsync("resources-info", automatic: true);
+            }
+            if (resourcesReady && connected && state.Verification == "verified" && !resourcesBusy && GeoNeedsDownload && !GeoPending && autoGeoSession != (state.Started.Length > 0 ? state.Started : "current"))
+            {
+                autoGeoSession = state.Started.Length > 0 ? state.Started : "current";
+                resourceOperation = ResourceActionCoreAsync("resources-download-geo-proxy", automatic: true);
+            }
         }
         catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
         { if (busy || switchingModes || disposed || version != generation || revision != sessionRevision) return; ClearTraffic(); Notice = "读取连接状态失败：" + e.Message; Changed(""); }
         finally { polling = false; }
     }
     private void ClearTraffic() { Upload = Download = ""; UploadSamples = []; DownloadSamples = []; }
+    public async Task InitializeResourcesAsync()
+    {
+        if (resourcesReady) return;
+        await RunResourceActionAsync("resources-info");
+        resourcesReady = true;
+    }
+    public Task RunResourceActionAsync(string command)
+    {
+        if (!CanCheckResources || command == "resources-download-core" && !CanDownloadCore || command == "resources-download-geo" && !CanDownloadGeo) return Task.CompletedTask;
+        return resourceOperation = ResourceActionCoreAsync(command, automatic: false);
+    }
+    private void UpdateResourceInfo(ResourceInfo info, bool updateCore)
+    {
+        if (updateCore) { CoreVersion = info.CoreVersion.Length > 0 ? info.CoreVersion : "未安装 / 无法读取"; CoreNeedsDownload = info.CoreNeedsDownload; CoreCheckText = info.CoreCheck; }
+        GeoUpdated = info.GeoUpdated.Length > 0 ? info.GeoUpdated : "尚未更新";
+        GeoNeedsDownload = info.GeoNeedsDownload; GeoPending = info.GeoPending; Changed("");
+    }
+    private async Task ResourceActionCoreAsync(string command, bool automatic)
+    {
+        resourcesBusy = true;
+        resourcesInstalling = command is "resources-download-core" or "resources-apply" || command == "resources-download-geo" && !connected;
+        var coreDownload = command == "resources-download-core";
+        var geoDownload = command.Contains("download-geo", StringComparison.Ordinal);
+        if (!automatic) Notice = "";
+        if (coreDownload) { CoreDownloadActive = CoreDownloadIndeterminate = true; CoreDownloadProgress = 0; CoreResourceMessage = "正在获取内核下载信息…"; }
+        if (geoDownload) { GeoDownloadActive = GeoDownloadIndeterminate = true; GeoDownloadProgress = 0; GeoResourceMessage = "正在下载 GeoFiles…"; }
+        Changed("");
+        try
+        {
+            var info = await resources.RunAsync(command, Log, HandleResourceProgress);
+            var applyFailed = false;
+            if (!connected && info.GeoPending && !exiting && !preparing && !busy && !switchingModes)
+            {
+                resourcesInstalling = true; Changed("");
+                await workflow.WaitAsync();
+                try { var applied = await resources.RunAsync("resources-apply", Log, HandleResourceProgress); info = applied with { CoreVersion = info.CoreVersion, CoreNeedsDownload = info.CoreNeedsDownload, CoreCheck = info.CoreCheck }; }
+                catch (Exception e)
+                {
+                    applyFailed = true; Log("GeoFiles 替换：" + e.Message);
+                    GeoResourceMessage = "GeoFiles 已下载，但替换未完成，请重试。";
+                    if (!exiting) Notice = GeoResourceMessage;
+                }
+                finally { workflow.Release(); }
+            }
+            UpdateResourceInfo(info, command is "resources-check-core" or "resources-download-core" || command == "resources-info" && !resourcesReady);
+            if (coreDownload) CoreResourceMessage = $"mihomo 安装 / 替换成功（{info.CoreVersion}）。";
+            if (info.GeoPending && !applyFailed) { GeoResourceMessage = "下载完成，等待 VPN 断开后替换。"; Notice = "GeoFiles 已下载，将在本次 VPN 断开后替换。"; }
+            else if (!automatic && !applyFailed) Notice = command == "resources-info" ? Notice : "检查 / 下载完成。";
+        }
+        catch (Exception e) { Log("资源操作：" + e.Message); if (coreDownload) CoreResourceMessage = "内核下载 / 替换未完成，请重试。"; if (geoDownload) GeoResourceMessage = "GeoFiles 下载未完成，请重试。"; if (command == "resources-apply") GeoResourceMessage = "GeoFiles 已下载，但替换未完成，请重试。"; if (!exiting) Notice = "资源检查 / 下载未完成：" + e.Message; }
+        finally { resourcesBusy = resourcesInstalling = false; if (coreDownload) CoreDownloadActive = CoreDownloadIndeterminate = false; if (geoDownload) GeoDownloadActive = GeoDownloadIndeterminate = false; Changed(""); }
+    }
+    private void HandleResourceProgress(ResourceProgress progress)
+    {
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            if (disposed) return;
+            var value = progress.Total > 0 ? Math.Clamp(progress.Done * 100.0 / progress.Total, 0, 100) : 0;
+            var text = progress.Phase switch
+            {
+                "download" => $"{progress.File} · {progress.Done / 1048576.0:0.00} MB" + (progress.Total > 0 ? $" / {progress.Total / 1048576.0:0.00} MB（{value:0}%）" : ""),
+                "validate" => "下载完成，正在校验…",
+                "staged" => "下载完成，等待 VPN 断开后替换。",
+                "installed" => progress.Resource == "core" ? "mihomo 已替换成功。" : "GeoFiles 已替换成功。",
+                "error" => "GeoFiles 替换未完成，请检查后重试。",
+                _ => "正在处理…"
+            };
+            if (progress.Resource == "core") { CoreDownloadProgress = value; CoreDownloadIndeterminate = progress.Total <= 0; CoreResourceMessage = text; }
+            if (progress.Resource == "geo") { GeoDownloadProgress = value; GeoDownloadIndeterminate = progress.Total <= 0; GeoResourceMessage = text; }
+            Changed("");
+        });
+    }
+    private async Task StopResourceWorkAsync()
+    {
+        if (!resourceOperation.IsCompleted) { await resources.CancelAsync(); await resourceOperation; if (!exiting) autoGeoSession = ""; }
+    }
     public Task GeoAsync(bool repair)
     {
         if (IsBusy || !CanConfigure) return Task.CompletedTask;
@@ -380,6 +506,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         SetBusy(true); GeoStatus = repair ? "正在下载缺失数据库…" : "正在检查…";
         try
         {
+            await StopResourceWorkAsync();
             await engine.RunAsync(repair ? "geo-repair" : "geo-check", Log);
             GeoStatus = "GeoIP / GeoSite 已就绪（本地大小检查，非远端版本检查）";
         }
@@ -398,7 +525,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         exiting = true; ++sessionRevision; Changed("");
         try
         {
-            if (switchingModes || busy && !connecting) await engine.CancelAsync();
+            if (switchingModes || busy) await engine.CancelAsync();
+            await StopResourceWorkAsync();
             await ModeChangeTask;
             await geoOperation;
             if (connecting) await ToggleAsync();
@@ -408,7 +536,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (connected || cleanupFailed)
             {
                 SetBusy(true); Status = "正在退出，清理连接";
-                try { await engine.RunAsync("disconnect", Log); cleanupFailed = false; }
+                try { await engine.RunAsync("desktop-disconnect", Log); cleanupFailed = false; }
                 catch { cleanupFailed = true; throw; }
                 finally { SetBusy(false); }
             }
@@ -418,7 +546,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         catch (Exception e) { Notice = "退出清理失败：" + e.Message; return false; }
         finally { exiting = false; Changed(""); }
     }
-    public void Dispose() { disposed = true; ++generation; _ = engine.CancelAsync(); engine.Dispose(); }
+    public void Dispose() { disposed = true; ++generation; _ = engine.CancelAsync(); _ = resources.CancelAsync(); resources.Dispose(); engine.Dispose(); }
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed([CallerMemberName] string name = "") => PropertyChanged?.Invoke(this, new(name));
 }

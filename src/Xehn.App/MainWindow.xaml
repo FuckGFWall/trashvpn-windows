@@ -10,7 +10,7 @@
      <RadioButton GroupName="Navigation" Style="{StaticResource Nav}" Tag="About" Checked="Navigate"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE946;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="26" VerticalAlignment="Center" Margin="0,0,14,0"/><TextBlock Text="关于" FontSize="21"/></StackPanel></RadioButton>
      <RadioButton GroupName="Navigation" Style="{StaticResource Nav}" Tag="Logs" Checked="Navigate"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="26" VerticalAlignment="Center" Margin="0,0,14,0"/><TextBlock Text="日志" FontSize="21"/></StackPanel></RadioButton>
     </StackPanel>
-    <StackPanel Grid.Row="2" Margin="12,0"><StackPanel Orientation="Horizontal"><Ellipse Fill="{DynamicResource Accent}" Width="6" Height="6" Margin="0,0,8,0"/><TextBlock Text="{Binding Status}" FontSize="12"/></StackPanel><TextBlock Text="FLUENT EDITION  /  0.1" Style="{StaticResource Muted}" FontSize="9" Margin="0,10,0,0"/></StackPanel>
+    <StackPanel Grid.Row="2" Margin="12,0"><StackPanel Orientation="Horizontal"><Ellipse Fill="{DynamicResource Accent}" Width="6" Height="6" Margin="0,0,8,0"/><TextBlock Text="{Binding Status}" FontSize="12"/></StackPanel><TextBlock Text="XEHN  /  1.0.0" Style="{StaticResource Muted}" FontSize="9" Margin="0,10,0,0"/></StackPanel>
    </Grid>
   </Border>
   <Grid Grid.Column="1" Margin="36,28,36,24">
@@ -72,11 +72,36 @@
       <Border Style="{StaticResource SettingsCard}" Margin="0,10,0,0" IsEnabled="{Binding CanConfigure}"><StackPanel><TextBlock Text="连接行为" Style="{StaticResource SectionTitle}"/><CheckBox Content="启动后自动连接" IsChecked="{Binding AutoConnect}"/><CheckBox Content="连接前检查节点可用性" IsChecked="{Binding VerifyBeforeConnect}" Margin="0,10,0,0" ToolTip="关闭：核心启动后先显示已连接（检测中），随后检测失败会立即断开。"/><Grid Style="{StaticResource SettingRow}"><TextBlock Text="优选强度" VerticalAlignment="Center"/><ComboBox SelectedValue="{Binding ScanIntensity}" SelectedValuePath="Tag" HorizontalAlignment="Right"><ComboBoxItem Content="低 · 较快" Tag="low"/><ComboBoxItem Content="中 · 均衡" Tag="medium"/><ComboBoxItem Content="高 · 更多候选" Tag="high"/></ComboBox></Grid><CheckBox Content="每次连接重新扫描" IsChecked="{Binding Rescan}" Margin="0,10,0,0"/><CheckBox Content="连接异常时自动修复" IsChecked="{Binding AutoRepair}" Margin="0,10,0,0"/><Grid Style="{StaticResource SettingRow}" Margin="0,8,0,0"><TextBlock Text="探测超时（秒）" VerticalAlignment="Center"/><TextBox Text="{Binding Timeout}" HorizontalAlignment="Right" Width="160"/></Grid></StackPanel></Border>
       <TextBlock Text="代理 / TUN 与全局 / 分流支持热切换；其他网络设置需断开后修改。" Style="{StaticResource Muted}" Margin="4,16,0,0"/>
      </StackPanel>
-     <StackPanel x:Name="AboutPage" Visibility="Collapsed">
-      <Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="XEHN" FontSize="32" FontWeight="Bold"/><TextBlock Text="Fluent Edition 0.1  ·  C# / WPF / .NET 10" Margin="0,16,0,0"/><TextBlock Text="WARP engine by XEHN · Traffic powered by mihomo" Style="{StaticResource Muted}" Margin="0,8,0,0"/></StackPanel></Border>
-      <Border Style="{StaticResource Card}" Margin="0,16,0,0"><StackPanel><TextBlock Text="Geo 数据库" Style="{StaticResource SectionTitle}"/><TextBlock Text="GeoIP + GeoSite" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="{Binding GeoStatus}" TextWrapping="Wrap" Margin="0,18,0,18"/><StackPanel Orientation="Horizontal" IsEnabled="{Binding CanConfigure}"><Button Content="检查数据库" Click="CheckGeo" Padding="18,8"/><Button Content="下载缺失数据库" Click="RepairGeo" Padding="18,8" Margin="10,0,0,0"/></StackPanel><TextBlock Text="来源：MetaCubeX / meta-rules-dat" Style="{StaticResource Muted}" Margin="0,18,0,0"/></StackPanel></Border>
-      <Border Style="{StaticResource Card}" Margin="0,16,0,0"><StackPanel><TextBlock Text="开源与致谢" Style="{StaticResource SectionTitle}"/><WrapPanel><Button Content="原项目 ↗" Tag="https://github.com/hezhanleiok/xehn" Click="OpenLink"/><Button Content="mihomo ↗" Tag="https://github.com/MetaCubeX/mihomo" Click="OpenLink" Margin="10,0,0,0"/><Button Content="第三方许可" Click="OpenNotices" Margin="10,0,0,0"/></WrapPanel></StackPanel></Border>
-     </StackPanel>
+     <Grid x:Name="AboutPage" Visibility="Collapsed">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Border x:Name="ProductCard" Style="{StaticResource Card}" Margin="0,0,8,8" MinHeight="228"><StackPanel>
+       <TextBlock Text="XEHN" FontSize="28" FontWeight="Bold"/>
+       <TextBlock x:Name="ProductVersion" Text="{Binding AppVersion}" FontSize="18" Margin="0,20,0,22"/>
+       <TextBlock><Hyperlink NavigateUri="https://github.com/FuckGFWall/trashvpn-windows" RequestNavigate="NavigateProject" Foreground="{DynamicResource Accent}">GitHub 项目主页 ↗</Hyperlink></TextBlock>
+      </StackPanel></Border>
+      <Border x:Name="CoreCard" Grid.Column="1" Style="{StaticResource Card}" Margin="8,0,0,8" MinHeight="228"><StackPanel>
+       <TextBlock Text="mihomo" Style="{StaticResource SectionTitle}" FontSize="22"/>
+       <TextBlock Text="{Binding CoreVersion}" FontSize="17" Margin="0,10,0,4"/>
+       <TextBlock Text="{Binding CoreCheckText}" Style="{StaticResource Muted}" TextWrapping="Wrap" MinHeight="34"/>
+       <WrapPanel Margin="0,16,0,0"><Button Content="检查" Tag="resources-check-core" Click="ResourceAction" IsEnabled="{Binding CanCheckResources}" Padding="16,7"/><Button Content="下载 mihomo" Tag="resources-download-core" Click="ResourceAction" IsEnabled="{Binding CanDownloadCore}" Visibility="{Binding CoreNeedsDownload, Converter={StaticResource BoolVisibility}}" Margin="10,0,0,0" Padding="14,7" ToolTip="断开 VPN 后下载安装；新内核通过全部协议检查后才替换旧内核。"/></WrapPanel>
+       <ProgressBar x:Name="CoreDownloadBar" Minimum="0" Maximum="100" Height="5" Margin="0,16,0,0" Foreground="{DynamicResource Accent}" Value="{Binding CoreDownloadProgress, Mode=OneWay}" IsIndeterminate="{Binding CoreDownloadIndeterminate}" Visibility="{Binding CoreDownloadActive, Converter={StaticResource BoolVisibility}}"/>
+       <TextBlock x:Name="CoreResourceStatus" Text="{Binding CoreResourceMessage}" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+      </StackPanel></Border>
+      <Border x:Name="GeoCard" Grid.Row="1" Style="{StaticResource Card}" Margin="0,8,8,0" MinHeight="228"><StackPanel>
+       <TextBlock Text="GeoFiles" Style="{StaticResource SectionTitle}" FontSize="22"/>
+       <TextBlock Margin="0,18,0,30"><Run Text="上次更新："/><Run Text="{Binding GeoUpdated, Mode=OneWay}"/></TextBlock>
+       <WrapPanel><Button Content="检查" Tag="resources-info" Click="ResourceAction" IsEnabled="{Binding CanCheckResources}" Padding="16,7"/><Button Content="下载 GeoFiles" Tag="resources-download-geo" Click="ResourceAction" IsEnabled="{Binding CanDownloadGeo}" Visibility="{Binding GeoNeedsDownload, Converter={StaticResource BoolVisibility}}" Margin="10,0,0,0" Padding="14,7"/></WrapPanel>
+       <ProgressBar x:Name="GeoDownloadBar" Minimum="0" Maximum="100" Height="5" Margin="0,16,0,0" Foreground="{DynamicResource Accent}" Value="{Binding GeoDownloadProgress, Mode=OneWay}" IsIndeterminate="{Binding GeoDownloadIndeterminate}" Visibility="{Binding GeoDownloadActive, Converter={StaticResource BoolVisibility}}"/>
+       <TextBlock x:Name="GeoResourceStatus" Text="{Binding GeoResourceMessage}" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+      </StackPanel></Border>
+      <Border x:Name="CreditsCard" Grid.Row="1" Grid.Column="1" Style="{StaticResource Card}" Margin="8,8,0,0" MinHeight="228"><StackPanel>
+       <TextBlock Text="开源与致谢" Style="{StaticResource SectionTitle}" FontSize="22"/>
+       <TextBlock Margin="0,18,0,12"><Hyperlink NavigateUri="https://github.com/hezhanleiok/xehn" RequestNavigate="NavigateProject" Foreground="{DynamicResource Accent}">原项目 XEHN ↗</Hyperlink></TextBlock>
+       <TextBlock Margin="0,0,0,18"><Hyperlink NavigateUri="https://github.com/MetaCubeX/mihomo" RequestNavigate="NavigateProject" Foreground="{DynamicResource Accent}">mihomo 内核 ↗</Hyperlink></TextBlock>
+       <Button Content="第三方许可" Click="OpenNotices" HorizontalAlignment="Left" Padding="16,7"/>
+      </StackPanel></Border>
+     </Grid>
      <Grid x:Name="LogsPage" Visibility="Collapsed"><Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="运行日志" Style="{StaticResource SectionTitle}"/><TextBox Text="{Binding Logs, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="480" FontFamily="Cascadia Mono, Consolas" FontSize="12"/><Button Content="复制日志" Click="CopyLogs" HorizontalAlignment="Left" Margin="0,18,0,0"/></StackPanel></Border></Grid>
     </Grid>
    </ScrollViewer>

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/xhwarp/warp-client/internal/core"
 )
@@ -64,15 +65,34 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !prepare {
+		dir, err := coreDir()
+		if err != nil {
+			return err
+		}
+		unlock, err := core.ResourceLock(ctx, dir)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		if _, err = os.Stat(core.CoreInDir(dir)); err != nil {
+			return fmt.Errorf("内核缺失，请在关于页检查并下载 mihomo：%w", err)
+		}
+		if err = core.ApplyPendingGeoData(dir, core.BinaryRunning(core.CoreInDir(dir))); err != nil {
+			if !core.GeoDataReady(dir) {
+				return err
+			}
+			fmt.Println("GeoFiles 暂存更新未完成，保留旧文件：", err)
+			core.ReportResourceProgress("geo", "error", "", 0, 0)
+		}
+	}
 	if !prepare && s.ProxyMode == modeBypass {
 		dir, err := coreDir()
 		if err != nil {
 			return err
 		}
-		if !core.GeoDataReady(dir) {
-			if err = core.DownloadGeoData(ctx, dir, func(s string) { fmt.Println(s) }); err != nil {
-				return err
-			}
+		if err = requireDesktopGeoData(dir); err != nil {
+			return err
 		}
 	}
 	err := runConnectCmd(ctx, o)
@@ -91,6 +111,30 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 		}
 	}
 	return err
+}
+
+func runDesktopDisconnect(parent context.Context, o options) error {
+	ctx, cancel := desktopContext(parent)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 45*time.Second)
+	defer timeout()
+	dir, e := coreDir()
+	if e != nil {
+		return e
+	}
+	unlock, e := core.ResourceLock(ctx, dir)
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	if e = runDisconnectCmd(ctx, o); e != nil {
+		return e
+	}
+	if e = core.ApplyPendingGeoData(dir, core.BinaryRunning(core.CoreInDir(dir))); e != nil {
+		fmt.Println("VPN 已断开；GeoFiles 替换未完成：", e)
+		core.ReportResourceProgress("geo", "error", "", 0, 0)
+	}
+	return nil
 }
 
 // Keep desktop preference mapping testable without registering or connecting.

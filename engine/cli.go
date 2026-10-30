@@ -21,6 +21,15 @@ type command struct {
 }
 
 var commands = []command{
+	{name: "desktop-disconnect", setup: func(*flag.FlagSet, *options) {}, run: runDesktopDisconnect},
+	{name: "resources-info", setup: func(*flag.FlagSet, *options) {}, run: func(ctx context.Context, _ options) error { return runResourceCommand(ctx, "resources-info") }},
+	{name: "resources-check-core", setup: func(*flag.FlagSet, *options) {}, run: func(ctx context.Context, _ options) error { return runResourceCommand(ctx, "resources-check-core") }},
+	{name: "resources-download-core", setup: func(*flag.FlagSet, *options) {}, run: func(ctx context.Context, _ options) error { return runResourceCommand(ctx, "resources-download-core") }},
+	{name: "resources-download-geo", setup: func(*flag.FlagSet, *options) {}, run: func(ctx context.Context, _ options) error { return runResourceCommand(ctx, "resources-download-geo") }},
+	{name: "resources-download-geo-proxy", setup: func(*flag.FlagSet, *options) {}, run: func(ctx context.Context, _ options) error {
+		return runResourceCommand(ctx, "resources-download-geo-proxy")
+	}},
+	{name: "resources-apply", setup: func(*flag.FlagSet, *options) {}, run: func(ctx context.Context, _ options) error { return runResourceCommand(ctx, "resources-apply") }},
 	{name: "desktop-prepare", setup: func(*flag.FlagSet, *options) {}, run: runDesktopPrepare},
 	{name: "desktop-connect", setup: func(*flag.FlagSet, *options) {}, run: runDesktopConnect},
 	{name: "desktop-modes", setup: func(*flag.FlagSet, *options) {}, run: runDesktopModes},

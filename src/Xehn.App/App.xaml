@@ -2,6 +2,7 @@
  <Application.Resources>
   <ResourceDictionary>
    <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.Light.xaml"/></ResourceDictionary.MergedDictionaries>
+   <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
    <SolidColorBrush x:Key="Accent" Color="#E76F22"/>
    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#D65B16"/>
    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#E76F22"/>
@@ -15,6 +16,17 @@
    <SolidColorBrush x:Key="MutedBrush" Color="#777A73"/>
    <SolidColorBrush x:Key="TintBrush" Color="#FFF0E5"/>
    <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource InkBrush}"/></Style>
+   <Style x:Key="TrayContextMenu" TargetType="ContextMenu">
+    <Setter Property="MinWidth" Value="196"/><Setter Property="Padding" Value="5"/>
+    <Setter Property="Background" Value="{DynamicResource PageBrush}"/><Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+    <Setter Property="FontFamily" Value="Segoe UI, Microsoft YaHei UI"/><Setter Property="FontSize" Value="13"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu"><Border x:Name="TrayMenuSurface" CornerRadius="12" Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"><Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.16"/></Border.Effect><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/></Border></ControlTemplate></Setter.Value></Setter>
+   </Style>
+   <Style x:Key="TrayMenuItem" TargetType="MenuItem">
+    <Setter Property="MinHeight" Value="38"/><Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="0,1"/>
+    <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem"><Border x:Name="ItemSurface" CornerRadius="7" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemSurface" Property="Background" Value="{DynamicResource TintBrush}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+   </Style>
    <Style x:Key="Muted" TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="FontSize" Value="12"/></Style>
    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource CardBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="24"/></Style>
    <Style x:Key="Segment" TargetType="RadioButton"><Setter Property="Padding" Value="20,9"/>

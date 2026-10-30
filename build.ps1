@@ -18,7 +18,7 @@ New-Item -ItemType Directory -Force $output,"$output\engine",$env:GOCACHE,$env:G
 if ($LASTEXITCODE) { throw 'WPF build failed' }
 Push-Location "$root\engine"
 try {
-    & $GoExecutable build -trimpath -ldflags '-s -w -H windowsgui -X main.version=fluent-0.1 -X main.windowsGUIBuild=1' -o "$output\engine\xehn-engine.exe" .
+    & $GoExecutable build -trimpath -ldflags '-s -w -H windowsgui -X main.version=1.0.0 -X main.windowsGUIBuild=1' -o "$output\engine\xehn-engine.exe" .
     if ($LASTEXITCODE) { throw 'Engine build failed' }
 } finally { Pop-Location }
 Copy-Item "$root\engine\THIRD_PARTY_NOTICES.md" $output

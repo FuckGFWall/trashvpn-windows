@@ -29,3 +29,5 @@ func KillByPID(pid int, expectExe string) error {
 func KillStaleCores(exe string) int { return 0 }
 
 func ProcessMatches(pid int, expectExe string) bool { return false }
+
+func BinaryRunning(exe string) bool { return false }

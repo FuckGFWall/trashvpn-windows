@@ -18,7 +18,7 @@ void Check(bool result, string label)
 using var engine = new EngineService(testHome, binary);
 var lines = new ConcurrentQueue<string>();
 await engine.RunAsync("version", lines.Enqueue).WaitAsync(TimeSpan.FromSeconds(15));
-Check(string.Join('\n', lines).Contains("fluent-0.1"), "hidden-process UTF-8 stdout / engine version");
+Check(string.Join('\n', lines).Contains("1.0.0"), "hidden-process UTF-8 stdout / engine version");
 var failed = false;
 try { await engine.RunAsync("geo-check", lines.Enqueue).WaitAsync(TimeSpan.FromSeconds(15)); }
 catch (IOException) { failed = true; }
@@ -34,6 +34,18 @@ var modeRejected = false;
 try { await engine.RunAsync("desktop-modes", lines.Enqueue, System.Text.Json.JsonSerializer.Serialize(new ClientSettings(), ClientSettings.JsonOptions)).WaitAsync(TimeSpan.FromSeconds(15)); }
 catch (IOException) { modeRejected = true; }
 Check(modeRejected && lines.Any(l => l.Contains("没有可热切换的本地连接")) && !File.Exists(Path.Combine(testHome, "core", "config.yaml")), "hot reload rejects stale session before API / proxy mutation");
+string resourceJson = "";
+await engine.RunAsync("resources-info", line => { if (line.StartsWith("@@RESOURCES ")) resourceJson = line[12..]; }).WaitAsync(TimeSpan.FromSeconds(15));
+var missingResources = System.Text.Json.JsonSerializer.Deserialize<ResourceInfo>(resourceJson, ClientSettings.JsonOptions)!;
+Check(missingResources.CoreNeedsDownload && missingResources.GeoNeedsDownload, "resource bridge reports missing core / GeoFiles without downloads");
+resourceJson = "";
+await ready.RunAsync("resources-check-core", line => { if (line.StartsWith("@@RESOURCES ")) resourceJson = line[12..]; }).WaitAsync(TimeSpan.FromSeconds(120));
+var checkedCore = System.Text.Json.JsonSerializer.Deserialize<ResourceInfo>(resourceJson, ClientSettings.JsonOptions)!;
+Check(!checkedCore.CoreNeedsDownload && checkedCore.CoreVersion.Length > 0 && checkedCore.CoreCheck.Contains("全部协议"), "real core version and every protocol checked with parser only");
+var proxyUpdateRejected = false;
+try { await engine.RunAsync("resources-download-geo-proxy", lines.Enqueue).WaitAsync(TimeSpan.FromSeconds(15)); }
+catch (IOException) { proxyUpdateRejected = true; }
+Check(proxyUpdateRejected && !Directory.Exists(Path.Combine(testHome, "core", ".geofiles-staging")), "automatic GeoFiles refuses stale VPN without direct-network fallback");
 
 // A loopback fixture, not a proxy or tunnel; verifies the mihomo traffic stream contract.
 var listener = new TcpListener(IPAddress.Loopback, 0);

@@ -75,8 +75,140 @@ internal static class WorkflowChecks
             var stop = vm.StopPreparationAsync(); PumpUntil(() => stop.IsCompleted);
             check(!vm.IsPreparing, "closing cancels background preparation cleanly");
             DesktopChecks(check, output);
+            VersionOneChecks(check, output);
         }
         finally { SynchronizationContext.SetSynchronizationContext(previous); }
+    }
+
+    private static void VersionOneChecks(Action<bool, string> check, string output)
+    {
+        FakeEngine NewEngine() => new(Path.Combine(output, "version-one", Guid.NewGuid().ToString("N")));
+        check(DesktopIntegration.NeedsStartupElevation("tun", false) && !DesktopIntegration.NeedsStartupElevation("proxy", false) && !DesktopIntegration.NeedsStartupElevation("tun", true), "saved TUN startup requests elevation only when required");
+        var ownerThread = Environment.CurrentManagedThreadId; var dispatched = false;
+        var shell = DesktopIntegration.RunOnStaAsync(() => { Thread.Sleep(100); return (Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()); });
+        Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => dispatched = true));
+        PumpUntil(() => shell.IsCompleted && dispatched);
+        check(shell.Result.Item1 != ownerThread && shell.Result.Item2 == ApartmentState.STA && dispatched, "slow shell / elevation launch runs on separate STA without freezing WPF dispatcher");
+        var denied = DesktopIntegration.RunOnStaAsync<object>(() => throw new System.ComponentModel.Win32Exception(1223));
+        PumpUntil(() => denied.IsCompleted);
+        check(denied.Exception?.InnerException is System.ComponentModel.Win32Exception error && error.NativeErrorCode == 1223, "STA launcher preserves UAC cancellation error for rollback");
+        var engine = NewEngine(); new ClientSettings { CaptureMode = "tun" }.Save(engine.Home);
+        check(ClientSettings.Load(engine.Home).CaptureMode == "tun", "TUN preference survives exit and next startup");
+
+        var modes = NewEngine(); modes.Connected = true;
+        using var vm = new MainViewModel(modes, new FakeDesktop()); vm.RefreshAsync().GetAwaiter().GetResult();
+        vm.VerifyBeforeConnect = true; vm.SplitSelected = true;
+        check(!vm.IsConnected && vm.Status.Contains("验证"), "strict hot switch withdraws connected UI until validation");
+        modes.Last.Emit("connection", state: "verifying");
+        check(!vm.IsConnected && vm.Status.Contains("验证"), "strict hot switch remains verifying before data-plane success");
+        modes.Last.Emit("connection", state: "verified"); modes.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.IsConnected && vm.SplitSelected, "strict hot switch displays connected after verification");
+        vm.VerifyBeforeConnect = false; vm.GlobalSelected = true;
+        modes.Last.Emit("connection", state: "provisional");
+        check(vm.IsConnected && vm.Status.Contains("检测中"), "fast hot switch explicitly displays connected-but-checking");
+        modes.Fail(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.SplitSelected && vm.Notice.Contains("失败"), "failed hot verification rolls mode back and surfaces failure");
+        modes.Verification = "failed"; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.Status.Contains("异常") && !vm.Status.Contains("已连接") && !vm.CanChangeModes && vm.CanToggleFromTray, "unverified rollback cannot masquerade as connected and still permits disconnect cleanup");
+
+        var network = NewEngine(); var resources = new FakeResources();
+        using var model = new MainViewModel(network, new FakeDesktop(), resources);
+        model.InitializeResourcesAsync().GetAwaiter().GetResult();
+        check(model.AppVersion == "1.0.0" && model.GeoNeedsDownload && model.GeoUpdated == "2026-10-20", "resource initialization reports version and old GeoFiles date");
+        network.Connected = true; network.Verification = "checking"; model.RefreshAsync().GetAwaiter().GetResult();
+        check(resources.Calls.Count == 1, "automatic GeoFiles never download before verified VPN");
+        network.Verification = "verified"; model.RefreshAsync().GetAwaiter().GetResult();
+        check(resources.Calls.Last() == "resources-download-geo-proxy" && model.CanToggleFromTray, "automatic stale GeoFiles use explicit VPN proxy without blocking disconnect");
+        resources.EmitProgress(new("geo", "download", "geosite.dat", 256, 1024));
+        check(model.GeoDownloadActive && !model.GeoDownloadIndeterminate && model.GeoDownloadProgress == 25, "GeoFiles progress uses real byte ratio in its own card");
+        resources.EmitProgress(new("geo", "download", "geoip.metadb", 512, 0));
+        check(model.GeoDownloadIndeterminate && model.GeoDownloadProgress == 0, "missing content length uses indeterminate progress, never a fake percentage");
+        resources.CompleteDownload(); PumpUntil(() => model.ResourceOperation.IsCompleted);
+        check(model.GeoPending && model.GeoUpdated == "2026-10-20" && !resources.Calls.Contains("resources-apply"), "connected GeoFiles download is staged without changing live update date");
+        check(model.GeoResourceMessage.Contains("等待") && !model.GeoResourceMessage.Contains("成功") && !model.GeoDownloadActive, "staged download is not misreported as a successful replacement");
+        var disconnect = model.ToggleAsync(); network.Connected = false; network.Complete(); PumpUntil(() => disconnect.IsCompleted);
+        check(!model.GeoPending && model.GeoUpdated == "2026-10-30" && resources.Calls.Contains("resources-apply"), "disconnect applies staged pair and refreshes date");
+        check(model.GeoResourceMessage.Contains("替换成功"), "GeoFiles card confirms actual replacement after disconnect");
+        model.RunResourceActionAsync("resources-check-core").GetAwaiter().GetResult();
+        check(model.CoreNeedsDownload && model.CoreCheckText.Contains("不支持"), "unsupported protocol check exposes core download action");
+        model.RunResourceActionAsync("resources-info").GetAwaiter().GetResult();
+        check(model.CoreNeedsDownload, "GeoFiles inspection cannot erase an unsupported-core verdict");
+        network.Connected = true; model.RefreshAsync().GetAwaiter().GetResult(); var count = resources.Calls.Count;
+        model.RunResourceActionAsync("resources-download-core").GetAwaiter().GetResult();
+        check(resources.Calls.Count == count, "core download cannot overwrite a running connection");
+        network.Connected = false; model.RefreshAsync().GetAwaiter().GetResult();
+        resources.HoldCoreDownload = true;
+        var coreDownload = model.RunResourceActionAsync("resources-download-core");
+        resources.EmitProgress(new("core", "download", "mihomo.zip", 750, 1000));
+        check(model.CoreDownloadActive && !model.CoreDownloadIndeterminate && model.CoreDownloadProgress == 75 && !model.GeoDownloadActive, "core download progress is separate from GeoFiles progress");
+        resources.CompleteCoreDownload(); PumpUntil(() => coreDownload.IsCompleted);
+        check(model.CoreVersion == "9.0.0" && !model.CoreNeedsDownload, "validated core install refreshes displayed version");
+        check(model.CoreResourceMessage.Contains("成功") && !model.CoreDownloadActive, "core card confirms successful install / replacement");
+
+        var retryEngine = NewEngine(); var retryResources = new FakeResources { FailDownload = true };
+        using var retry = new MainViewModel(retryEngine, new FakeDesktop(), retryResources);
+        retry.InitializeResourcesAsync().GetAwaiter().GetResult(); retryEngine.Connected = true;
+        retry.RefreshAsync().GetAwaiter().GetResult(); retry.RefreshAsync().GetAwaiter().GetResult(); retry.RefreshAsync().GetAwaiter().GetResult();
+        check(retryResources.Calls.Count(c => c == "resources-download-geo-proxy") == 1, "failed automatic update does not loop on each poll");
+        retryEngine.SessionId++; retry.RefreshAsync().GetAwaiter().GetResult();
+        check(retryResources.Calls.Count(c => c == "resources-download-geo-proxy") == 2, "new VPN session can retry failed automatic update");
+
+        var ageEngine = NewEngine(); var ageResources = new FakeResources(); ageResources.SetGeoAge(false);
+        using var age = new MainViewModel(ageEngine, new FakeDesktop(), ageResources);
+        age.InitializeResourcesAsync().GetAwaiter().GetResult(); ageEngine.Connected = true; age.RefreshAsync().GetAwaiter().GetResult();
+        check(!ageResources.Calls.Contains("resources-download-geo-proxy"), "current GeoFiles are not downloaded unnecessarily");
+        ageResources.SetGeoAge(true); ageEngine.SessionId++; age.RefreshAsync().GetAwaiter().GetResult();
+        check(ageResources.Calls.Last() == "resources-download-geo-proxy", "new verified session rechecks GeoFiles age instead of keeping startup age forever");
+        ageResources.CompleteDownload(); PumpUntil(() => age.ResourceOperation.IsCompleted);
+
+        var applyEngine = NewEngine(); var applyResources = new FakeResources { FailApply = true };
+        using var apply = new MainViewModel(applyEngine, new FakeDesktop(), applyResources);
+        apply.InitializeResourcesAsync().GetAwaiter().GetResult();
+        var applyDownload = apply.RunResourceActionAsync("resources-download-geo");
+        check(!apply.CanToggleFromTray, "offline GeoFiles download / replacement prevents a competing connection");
+        applyResources.CompleteDownload(); PumpUntil(() => applyDownload.IsCompleted);
+        check(apply.GeoPending && apply.GeoResourceMessage.Contains("已下载") && apply.GeoResourceMessage.Contains("替换未完成") && !apply.GeoResourceMessage.Contains("成功"), "replacement failure distinguishes completed staging from failed installation");
+
+        var cancelEngine = NewEngine(); var cancelResources = new FakeResources();
+        using var cancel = new MainViewModel(cancelEngine, new FakeDesktop(), cancelResources);
+        cancel.InitializeResourcesAsync().GetAwaiter().GetResult(); cancelEngine.Connected = true; cancel.RefreshAsync().GetAwaiter().GetResult();
+        var closing = cancel.ShutdownAsync(); PumpUntil(() => cancelEngine.Calls.Count > 0);
+        check(cancelResources.CancelCount == 1 && cancelEngine.Last.Command == "desktop-disconnect", "exit cancels automatic proxy download before disconnect cleanup");
+        cancelEngine.Connected = false; cancelEngine.Complete(); PumpUntil(() => closing.IsCompleted);
+        check(closing.Result, "exit with in-flight automatic update settles without deadlock");
+    }
+
+    private sealed class FakeResources : IResourceService
+    {
+        public List<string> Calls { get; } = [];
+        public int CancelCount;
+        public bool FailDownload;
+        public bool HoldCoreDownload;
+        public bool FailApply;
+        private ResourceInfo current = new("1.19.32", false, "", "2026-10-20", true, false);
+        private TaskCompletionSource<ResourceInfo>? download;
+        private TaskCompletionSource<ResourceInfo>? coreDownload;
+        private Action<ResourceProgress>? progress;
+        public Task<ResourceInfo> RunAsync(string command, Action<string> log, Action<ResourceProgress>? onProgress = null)
+        {
+            progress = onProgress;
+            Calls.Add(command);
+            if (command == "resources-check-core") return Task.FromResult(current with { CoreNeedsDownload = true, CoreCheck = "不支持 fixture 协议" });
+            if (command == "resources-download-core") { if (HoldCoreDownload) { coreDownload = new(TaskCreationOptions.RunContinuationsAsynchronously); return coreDownload.Task; } current = current with { CoreVersion = "9.0.0", CoreNeedsDownload = false }; return Task.FromResult(current); }
+            if (command == "resources-apply") { if (FailApply) return Task.FromException<ResourceInfo>(new IOException("fixture replacement failure")); current = current with { GeoPending = false, GeoUpdated = "2026-10-30", GeoNeedsDownload = false }; onProgress?.Invoke(new("geo", "installed", "", 1, 1)); return Task.FromResult(current); }
+            if (command.Contains("download-geo"))
+            {
+                if (FailDownload) return Task.FromException<ResourceInfo>(new IOException("fixture download failure"));
+                download = new(TaskCreationOptions.RunContinuationsAsynchronously); return download.Task;
+            }
+            return Task.FromResult(current);
+        }
+        public void CompleteDownload() { current = current with { GeoPending = true }; download!.SetResult(current); }
+        public void SetGeoAge(bool due) { current = current with { GeoNeedsDownload = due }; }
+        public void CompleteCoreDownload() { current = current with { CoreVersion = "9.0.0", CoreNeedsDownload = false }; coreDownload!.SetResult(current); }
+        public void EmitProgress(ResourceProgress value) => progress?.Invoke(value);
+        public Task CancelAsync() { CancelCount++; download?.TrySetCanceled(); coreDownload?.TrySetCanceled(); return Task.CompletedTask; }
+        public void Dispose() { }
     }
 
     private static void DesktopChecks(Action<bool, string> check, string output)
@@ -89,8 +221,8 @@ internal static class WorkflowChecks
             !MainWindow.ShouldHideOnClose(true, false, false) && !MainWindow.ShouldHideOnClose(true, true, true), "close policy never hides on explicit exit or missing tray");
         var shown = 0; var exits = 0;
         using var tray = new TrayService(vm, () => shown++, () => { exits++; return Task.CompletedTask; }, visible: false);
-        check(tray.ContextMenu.Items.Cast<System.Windows.Forms.ToolStripItem>().Select(i => i.Text).SequenceEqual(new[] { "退出", "连接 VPN", "显示主界面" }), "real tray menu has exactly the requested three actions");
-        tray.ContextMenu.Items[2].PerformClick(); tray.ContextMenu.Items[0].PerformClick();
+        check(tray.ContextMenu.Items.Cast<System.Windows.Controls.MenuItem>().Select(i => i.Header as string).SequenceEqual(new[] { "显示主界面", "连接 VPN", "退出" }), "real tray menu has exactly the requested three actions");
+        ((System.Windows.Controls.MenuItem)tray.ContextMenu.Items[0]).RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent)); ((System.Windows.Controls.MenuItem)tray.ContextMenu.Items[2]).RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.MenuItem.ClickEvent));
         check(shown == 1 && exits == 1, "tray show / exit actions dispatch to lifecycle handlers");
         vm.AutoStart = true;
         check(desktop.AutoStartEnabled && ClientSettings.Load(fake.Home).AutoStart, "autostart opt-in persists through isolated integration");
@@ -100,9 +232,9 @@ internal static class WorkflowChecks
         check(!vm.AutoStart && vm.Notice.Contains("自启动设置失败"), "autostart failure retains prior preference");
         check(DesktopIntegration.AutoStartCommand(@"D:\app path\Xehn.App.exe") == "\"D:\\app path\\Xehn.App.exe\"", "autostart quotes executable paths containing spaces");
         fake.Connected = true; vm.RefreshAsync().GetAwaiter().GetResult();
-        check(vm.CanChangeModes && !vm.CanConfigure && tray.ContextMenu.Items[1].Text == "关闭 VPN", "connected mode selectors enabled; tray reflects live session");
+        check(vm.CanChangeModes && !vm.CanConfigure && ((System.Windows.Controls.MenuItem)tray.ContextMenu.Items[1]).Header as string == "关闭 VPN", "connected mode selectors enabled; tray reflects live session");
         vm.SplitSelected = true;
-        check(fake.Last.Command == "desktop-modes" && fake.Last.Route == "bypass" && !vm.CanChangeModes && !tray.ContextMenu.Items[1].Enabled, "routing hot switch uses one serialized engine reload and disables tray toggle");
+        check(fake.Last.Command == "desktop-modes" && fake.Last.Route == "bypass" && !vm.CanChangeModes && !((System.Windows.Controls.MenuItem)tray.ContextMenu.Items[1]).IsEnabled, "routing hot switch uses one serialized engine reload and disables tray toggle");
         vm.TunSelected = true;
         check(fake.Calls.Count == 1, "overlapping mode request cannot start a second operation");
         fake.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
@@ -120,7 +252,7 @@ internal static class WorkflowChecks
         check(vm.ProxySelected && vm.IsConnected && fake.Calls.Count == count && desktop.RestartReconnect && desktop.PrepareCount == 0, "UAC cancellation preserves connected proxy and settings");
         desktop.AcceptRestart = true;
         vm.TunSelected = true;
-        check(fake.Last.Command == "disconnect" && vm.ProxySelected, "accepted elevation cleans old connection before committing TUN");
+        check(fake.Last.Command == "desktop-disconnect" && vm.ProxySelected, "accepted elevation cleans old connection before committing TUN");
         fake.Connected = false; fake.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
         check(vm.TunSelected && !vm.IsConnected && ClientSettings.Load(fake.Home).CaptureMode == "tun" && desktop.RestartReconnect, "elevation handoff persists target and reconnect intent after cleanup");
         check(fake.MaxConcurrent == 1, "mode / elevation operations keep single engine ownership");
@@ -134,7 +266,7 @@ internal static class WorkflowChecks
         using var runningVm = new MainViewModel(running, new FakeDesktop());
         runningVm.RefreshAsync().GetAwaiter().GetResult();
         var shutdown = runningVm.ShutdownAsync();
-        check(running.Last.Command == "disconnect" && !runningVm.CanToggleFromTray, "explicit exit disconnects active VPN instead of hiding");
+        check(running.Last.Command == "desktop-disconnect" && !runningVm.CanToggleFromTray, "explicit exit disconnects active VPN instead of hiding");
         running.Connected = false; running.Complete(); PumpUntil(() => shutdown.IsCompleted);
         check(shutdown.Result && !runningVm.IsConnected, "exit waits for disconnect and state cleanup");
 
@@ -159,21 +291,21 @@ internal static class WorkflowChecks
         var failedExit = cleanupVm.ShutdownAsync(); cleanup.Fail(); PumpUntil(() => failedExit.IsCompleted);
         check(!failedExit.Result && cleanupVm.Notice.Contains("退出清理失败"), "cleanup failure keeps application open for retry");
         var retriedExit = cleanupVm.ShutdownAsync();
-        check(cleanup.Last.Command == "disconnect", "failed exit retries cleanup instead of starting a new connection");
+        check(cleanup.Last.Command == "desktop-disconnect", "failed exit retries cleanup instead of starting a new connection");
         cleanup.Connected = false; cleanup.Complete(); PumpUntil(() => retriedExit.IsCompleted);
         check(retriedExit.Result, "successful cleanup retry permits exit");
 
         var switching = NewEngine(); switching.Connected = true;
         using var switchingVm = new MainViewModel(switching, new FakeDesktop()); switchingVm.RefreshAsync().GetAwaiter().GetResult();
         switchingVm.SplitSelected = true;
-        var switchExit = switchingVm.ShutdownAsync(); PumpUntil(() => switching.Last.Command == "disconnect");
+        var switchExit = switchingVm.ShutdownAsync(); PumpUntil(() => switching.Last.Command == "desktop-disconnect");
         switching.Connected = false; switching.Complete(); PumpUntil(() => switchExit.IsCompleted);
         check(switchExit.Result && switchingVm.GlobalSelected && switching.MaxConcurrent == 1, "exit during hot reload waits for cancellation / rollback before disconnecting");
 
         var unpolled = NewEngine(); unpolled.Connected = true;
         using var unpolledVm = new MainViewModel(unpolled, new FakeDesktop());
         var unpolledExit = unpolledVm.ShutdownAsync();
-        check(unpolled.Last.Command == "disconnect", "exit re-reads disk session even before first UI poll");
+        check(unpolled.Last.Command == "desktop-disconnect", "exit re-reads disk session even before first UI poll");
         unpolled.Connected = false; unpolled.Complete(); PumpUntil(() => unpolledExit.IsCompleted);
         check(unpolledExit.Result, "unpolled session is cleaned before exit");
 
@@ -221,6 +353,8 @@ internal static class WorkflowChecks
         public int CancelCount, MaxConcurrent;
         private int concurrent;
         public bool Connected;
+        public string Verification = "verified";
+        public int SessionId;
         public TaskCompletionSource<Session>? PendingRead;
         public async Task RunAsync(string command, Action<string> log, string? settingsJson = null, bool prepared = false)
         {
@@ -235,7 +369,7 @@ internal static class WorkflowChecks
         }
         public void Complete() => Last.Finished.TrySetResult();
         public void Fail() => Last.Finished.TrySetException(new IOException("simulated verification failure"));
-        public Task<Session> ReadSessionAsync() => PendingRead?.Task ?? Task.FromResult(new Session(Connected));
+        public Task<Session> ReadSessionAsync() => PendingRead?.Task ?? Task.FromResult(new Session(Connected, Started: "fixture-" + SessionId, Verification: Verification));
         public Task<(double Up, double Down)> TrafficAsync(int port) => Task.FromResult((0d, 0d));
         public void Dispose() { }
     }

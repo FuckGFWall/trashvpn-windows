@@ -213,3 +213,43 @@ func ProcessMatches(pid int, expectExe string) bool {
 	want, err := filepath.Abs(expectExe)
 	return err == nil && strings.EqualFold(windows.UTF16ToString(buf[:size]), want)
 }
+
+func BinaryRunning(exe string) bool {
+	want, err := filepath.Abs(exe)
+	if err != nil {
+		return true
+	}
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return true
+	}
+	defer windows.CloseHandle(snap)
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	for err = windows.Process32First(snap, &entry); err == nil; err = windows.Process32Next(snap, &entry) {
+		if !strings.EqualFold(windows.UTF16ToString(entry.ExeFile[:]), filepath.Base(want)) {
+			continue
+		}
+		// An inaccessible same-named process is not proof that this core is
+		// stopped. Fail closed, even if that conservatively blocks an update.
+		h, openErr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, entry.ProcessID)
+		if openErr != nil {
+			if errors.Is(openErr, windows.ERROR_INVALID_PARAMETER) {
+				continue // Process exited since the snapshot.
+			}
+			return true
+		}
+		event, waitErr := windows.WaitForSingleObject(h, 0)
+		var buf [32768]uint16
+		size := uint32(len(buf))
+		queryErr := windows.QueryFullProcessImageName(h, 0, &buf[0], &size)
+		windows.CloseHandle(h)
+		if waitErr == nil && event == windows.WAIT_OBJECT_0 {
+			continue
+		}
+		if waitErr != nil || queryErr != nil || strings.EqualFold(windows.UTF16ToString(buf[:size]), want) {
+			return true
+		}
+	}
+	return !errors.Is(err, windows.ERROR_NO_MORE_FILES)
+}

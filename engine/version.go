@@ -41,7 +41,7 @@ const (
 )
 
 // Set through -ldflags "-X main.version=" from the git tag; see VERSIONING.md.
-var version = "dev"
+var version = "1.0.0"
 
 // windowsGUIBuild is "1" only in the -H windowsgui build (pack.ps1 injects
 // it). The UAC proxy helper may only run from that build: relaunching a

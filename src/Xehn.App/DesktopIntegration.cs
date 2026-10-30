@@ -52,14 +52,18 @@ public sealed class DesktopIntegration : IDesktopIntegration
         var start = new ProcessStartInfo(Executable) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory };
         foreach (var arg in new[] { "--elevated-restart", Environment.ProcessId.ToString(), token, reconnect ? "1" : "0" }) start.ArgumentList.Add(arg);
         Process? child;
-        try { child = Process.Start(start); }
+        // ShellExecute / UAC can wait on shell extensions. Never block WPF's
+        // dispatcher while the elevated child is trying to handshake with us.
+        try { child = await StartOnStaAsync(start).WaitAsync(TimeSpan.FromSeconds(60)); }
         catch (Win32Exception e) when (e.NativeErrorCode == 1223) { return false; } // UAC declined: keep existing connection.
         using (child)
         {
             if (child == null) throw new IOException("无法启动管理员进程。");
             try
             {
-                if (!await Task.Run(() => started.WaitOne(TimeSpan.FromSeconds(20)))) throw new IOException("管理员进程未就绪，未关闭当前客户端。");
+                using var exited = new EventWaitHandle(false, EventResetMode.ManualReset);
+                exited.SafeWaitHandle = new Microsoft.Win32.SafeHandles.SafeWaitHandle(child.Handle, ownsHandle: false);
+                if (await Task.Run(() => WaitHandle.WaitAny([started, exited], TimeSpan.FromSeconds(20))) != 0) throw new IOException("管理员进程未就绪或提前退出，未关闭当前客户端。");
                 if (!await prepare()) return false;
                 if (child.HasExited) throw new IOException("管理员进程提前退出，未关闭当前客户端。");
                 // The elevated child waits for BOTH this signal and parent exit,
@@ -72,6 +76,15 @@ public sealed class DesktopIntegration : IDesktopIntegration
             finally { abort.Set(); }
         }
     }
+    public static Task<Process?> StartOnStaAsync(ProcessStartInfo start) => RunOnStaAsync(() => Process.Start(start));
+    public static Task<T> RunOnStaAsync<T>(Func<T> operation)
+    {
+        var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() => { try { result.SetResult(operation()); } catch (Exception e) { result.SetException(e); } }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA); thread.Start();
+        return result.Task;
+    }
+    public static bool NeedsStartupElevation(string captureMode, bool elevated) => captureMode == "tun" && !elevated;
     private static string EventName(string token, string kind) => @"Local\Xehn.Restart." + token + "." + kind;
     public static async Task<bool> WaitForRestartAsync(string[] args)
     {

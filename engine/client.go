@@ -91,24 +91,25 @@ func statePath() (string, error) {
 // clientState is persisted between invocations so status can report the active
 // endpoint and the disconnect can restore the exact prior system-proxy state.
 type clientState struct {
-	Proto     string `json:"proto"`
-	Endpoint  string `json:"endpoint"`
-	ExitIP    string `json:"exit_ip,omitempty"`
-	Country   string `json:"country,omitempty"`
-	Colo      string `json:"colo,omitempty"`
-	NodeCity  string `json:"node_city,omitempty"`
-	LatencyMS int64  `json:"latency_ms,omitempty"`
-	TunLatMS  int64  `json:"tun_latency_ms,omitempty"`
-	LossPct   string `json:"loss,omitempty"`
-	Connected bool   `json:"connected"`
-	MixedPort int    `json:"mixed_port"`
-	APIPort   int    `json:"api_port"`
-	CorePID   int    `json:"core_pid,omitempty"`
-	TUN       bool   `json:"tun"`
-	AllowLan  bool   `json:"allow_lan,omitempty"`
-	Family    string `json:"family,omitempty"`
-	StartedAt string `json:"started_at,omitempty"`
-	ProxySnap []byte `json:"proxy_snapshot,omitempty"`
+	Proto        string `json:"proto"`
+	Endpoint     string `json:"endpoint"`
+	ExitIP       string `json:"exit_ip,omitempty"`
+	Country      string `json:"country,omitempty"`
+	Colo         string `json:"colo,omitempty"`
+	NodeCity     string `json:"node_city,omitempty"`
+	LatencyMS    int64  `json:"latency_ms,omitempty"`
+	TunLatMS     int64  `json:"tun_latency_ms,omitempty"`
+	LossPct      string `json:"loss,omitempty"`
+	Connected    bool   `json:"connected"`
+	Verification string `json:"verification,omitempty"`
+	MixedPort    int    `json:"mixed_port"`
+	APIPort      int    `json:"api_port"`
+	CorePID      int    `json:"core_pid,omitempty"`
+	TUN          bool   `json:"tun"`
+	AllowLan     bool   `json:"allow_lan,omitempty"`
+	Family       string `json:"family,omitempty"`
+	StartedAt    string `json:"started_at,omitempty"`
+	ProxySnap    []byte `json:"proxy_snapshot,omitempty"`
 	// ProxyWarn records why the WinINET proxy edit failed while the tunnel
 	// itself is verified working (e.g. antivirus proxy-hijack heuristics
 	// blocking the registry write). Empty means the proxy was set normally.
@@ -557,6 +558,11 @@ func renderClientHeader(opts options) string {
 	}
 	fmt.Fprintf(&b, "mode: %s\n", mihomoMode(opts))
 	b.WriteString("log-level: info\n")
+	if opts.desktop {
+		// The desktop stages database updates and replaces them offline; do
+		// not let the core's own timer bypass that lifecycle.
+		b.WriteString("geo-auto-update: false\n")
+	}
 	fmt.Fprintf(&b, "ipv6: %t\n", opts.ipFamily() != famV4)
 	fmt.Fprintf(&b, "external-controller: 127.0.0.1:%d\n", opts.apiPort)
 	if dns := confDNSList(opts); len(dns) > 0 {

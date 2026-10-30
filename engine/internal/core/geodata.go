@@ -83,7 +83,7 @@ func DownloadGeoData(ctx context.Context, dir string, logf func(string)) error {
 
 // fetchToFile streams url into dst through a .part file, so an interrupted
 // download never leaves a half-written database where mihomo would read it.
-func fetchToFile(ctx context.Context, client *http.Client, url, dst string, min int64) (int64, error) {
+func fetchToFile(ctx context.Context, client *http.Client, url, dst string, min int64, progress ...func(int64, int64)) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, err
@@ -103,7 +103,13 @@ func fetchToFile(ctx context.Context, client *http.Client, url, dst string, min 
 	if err != nil {
 		return 0, err
 	}
-	n, copyErr := io.Copy(f, resp.Body)
+	var n int64
+	var copyErr error
+	if len(progress) > 0 {
+		n, copyErr = copyResourceProgress(f, resp.Body, resp.ContentLength, progress[0])
+	} else {
+		n, copyErr = io.Copy(f, resp.Body)
+	}
 	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(tmp)

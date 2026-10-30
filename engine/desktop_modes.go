@@ -47,6 +47,9 @@ type modeSwitchOps struct {
 	restoreProxy func(*core.ProxySnapshot) error
 	config       func([]byte) error
 	state        func(clientState) error
+	verify       func(context.Context) (clientState, error)
+	connection   func(string)
+	optimistic   bool
 }
 
 // Commit only after reload + host capture succeeded; every failure rolls back
@@ -77,7 +80,25 @@ func applyDesktopModes(ctx context.Context, old clientState, before, after []byt
 			}
 		}
 		if filesTouched {
-			failures = append(failures, ops.config(before), ops.state(old))
+			failures = append(failures, ops.config(before))
+		}
+		restored := old
+		if ops.verify != nil {
+			// A failed switch does not prove the restored data plane works.
+			// Recheck it within the rollback budget instead of repainting a
+			// dead / incomplete rollback as an already verified connection.
+			if errors.Join(failures...) == nil {
+				_, verifyErr := ops.verify(rollback)
+				failures = append(failures, verifyErr)
+			}
+			if errors.Join(failures...) != nil {
+				restored.Verification = "failed"
+			} else {
+				restored.Verification = "verified"
+			}
+		}
+		if filesTouched || restored.Verification == "failed" {
+			failures = append(failures, ops.state(restored))
 		}
 		if e := errors.Join(failures...); e != nil {
 			err = errors.Join(err, fmt.Errorf("回滚未完成，请检查连接及系统代理：%w", e))
@@ -85,6 +106,30 @@ func applyDesktopModes(ctx context.Context, old clientState, before, after []byt
 	}()
 	if err = ops.reload(ctx, after, tun); err != nil {
 		return err
+	}
+	if ops.verify != nil {
+		next.Verification = "checking"
+		filesTouched = true
+		checking := old
+		checking.Verification = "checking"
+		if err = ops.state(checking); err != nil {
+			return err
+		}
+		if ops.connection != nil {
+			if ops.optimistic {
+				ops.connection("provisional")
+			} else {
+				ops.connection("verifying")
+			}
+		}
+		var probe clientState
+		if probe, err = ops.verify(ctx); err != nil {
+			return fmt.Errorf("模式切换后的真实连接验证失败: %w", err)
+		}
+		next.Verification = "verified"
+		if probe.ExitIP != "" {
+			next.ExitIP = probe.ExitIP
+		}
 	}
 	if old.TUN != tun {
 		next.ProxyWarn = ""
@@ -117,12 +162,19 @@ func applyDesktopModes(ctx context.Context, old clientState, before, after []byt
 		return err
 	}
 	err = ops.state(next)
+	if err == nil && ops.connection != nil {
+		ops.connection("verified")
+	}
 	return err
 }
 
 func runDesktopModes(parent context.Context, _ options) error {
 	ctx, cancel := desktopContext(parent)
 	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 45*time.Second)
+	defer timeout()
+	desktopEvents = true
+	defer func() { desktopEvents = false }()
 	s := loadSettings()
 	if err := json.Unmarshal([]byte(os.Getenv("WARP_DESKTOP_SETTINGS")), &s); err != nil {
 		return err
@@ -141,12 +193,18 @@ func runDesktopModes(parent context.Context, _ options) error {
 	if err != nil {
 		return err
 	}
+	unlock, err := core.ResourceLock(ctx, dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if !st.Connected || !core.ProcessMatches(st.CorePID, core.CoreInDir(dir)) {
 		return fmt.Errorf("没有可热切换的本地连接")
 	}
-	if s.ProxyMode == modeBypass && !core.GeoDataReady(dir) {
-		// Do not silently turn split routing into global routing.
-		if err := core.DownloadGeoData(ctx, dir, func(line string) { fmt.Println(line) }); err != nil {
+	if s.ProxyMode == modeBypass {
+		// Never download directly into a live work directory. Keep the old
+		// route if its required databases need a staged, offline replacement.
+		if err := requireDesktopGeoData(dir); err != nil {
 			return err
 		}
 	}
@@ -158,9 +216,8 @@ func runDesktopModes(parent context.Context, _ options) error {
 	if err != nil {
 		return err
 	}
-	if err := core.TestConfig(core.CoreInDir(dir), dir, after); err != nil {
-		return err
-	}
+	// The controller validates the payload itself. Do not launch a second
+	// mihomo -t against a live work directory (cache / geodata can be locked).
 	c, err := core.New(core.Config{BinaryPath: core.CoreInDir(dir), WorkDir: dir})
 	if err != nil {
 		return err
@@ -171,6 +228,8 @@ func runDesktopModes(parent context.Context, _ options) error {
 		},
 		setProxy:     func() (*core.ProxySnapshot, error) { return core.SetSystemProxy(st.MixedPort) },
 		restoreProxy: core.UnsetSystemProxy, config: c.WriteConfig, state: saveState,
+		verify:     func(ctx context.Context) (clientState, error) { return verifyDesktopMode(ctx, st.MixedPort, st.Family) },
+		connection: desktopConnection, optimistic: !s.VerifyBeforeConnect,
 	})
 	if err == nil {
 		fmt.Println("接管 / 路由模式已热切换，保留当前节点与内核进程")
