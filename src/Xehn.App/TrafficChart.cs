@@ -93,12 +93,26 @@ public sealed class TrafficChart : FrameworkElement
     {
         if (ActualWidth <= 0 || ActualHeight <= 4) return;
         dc.PushClip(new RectangleGeometry(new Rect(RenderSize)));
-        // Keep the zero level visible even before the first sample or after
-        // the last retained sample has left the time window.
-        dc.DrawLine(new Pen(Stroke, 1.2), new Point(0, ActualHeight - 2), new Point(ActualWidth, ActualHeight - 2));
         var points = Series == null ? [] : Project(Series, Series.NowSeconds, ActualWidth, ActualHeight);
-        if (points.Length == 1) dc.DrawEllipse(Stroke, null, points[0], 1, 1);
-        else if (points.Length > 1) dc.DrawGeometry(null, new Pen(Stroke, 1.8) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round }, SmoothCurve(points));
+        dc.DrawGeometry(null, new Pen(Stroke, 1.8) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round }, SmoothCurve(WithZeroTails(points, ActualWidth, ActualHeight)));
         dc.Pop();
+    }
+    // One continuous traffic path, not a separate horizontal axis underneath
+    // peaks. Zero padding only extends the unrecorded ends of the time window;
+    // it never adds samples to the actual traffic history.
+    public static Point[] WithZeroTails(IReadOnlyList<Point> points, double width, double height)
+    {
+        var zero = height - 2;
+        if (points.Count == 0) return [new(0, zero), new(width, zero)];
+        var result = new List<Point>();
+        if (points[0].X > 0) result.Add(new(0, zero));
+        result.AddRange(points);
+        var last = points[^1];
+        if (last.X < width)
+        {
+            if (Math.Abs(last.Y - zero) > .01) result.Add(new(Math.Min(width, last.X + width * 2 / TrafficSeries.WindowSeconds), zero));
+            if (result[^1].X < width) result.Add(new(width, zero));
+        }
+        return result.ToArray();
     }
 }

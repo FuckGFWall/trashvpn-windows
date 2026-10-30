@@ -19,15 +19,15 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         model = new MainViewModel(); DataContext = model;
-        SourceInitialized += (_, _) => { WindowPresentation.FitToWorkArea(this, center: true); UpdateTitleBar(); };
-        DpiChanged += (_, _) => Dispatcher.BeginInvoke(new Action(() => { if (!closed) WindowPresentation.FitToWorkArea(this, center: false); }));
+        SourceInitialized += (_, _) => { WindowPresentation.FitToWorkArea(this, center: true, fixedWidth: 800); WindowPresentation.DisableMaximize(this); UpdateTitleBar(); };
+        DpiChanged += (_, _) => Dispatcher.BeginInvoke(new Action(() => { if (!closed) WindowPresentation.FitToWorkArea(this, center: false, fixedWidth: 800); }));
         App.ThemeChanged += UpdateTitleBar;
         timer.Tick += async (_, _) => await model.RefreshAsync();
         Loaded += async (_, _) =>
         {
             if (loaded) return;
             loaded = true;
-            WindowPresentation.FitToWorkArea(this, center: false); UpdateTitleBar();
+            WindowPresentation.FitToWorkArea(this, center: false, fixedWidth: 800); UpdateTitleBar();
             try { tray = new TrayService(model, ShowMainWindow, RequestExitAsync); }
             catch (Exception ex) { model.Notice = "托盘初始化失败，关闭窗口将退出：" + ex.Message; }
             await model.InitializeResourcesAsync();
@@ -45,8 +45,8 @@ public partial class MainWindow : Window
     }
     private void UpdateTitleBar() => WindowPresentation.ApplyTitleBar(this, App.IsDarkTheme,
         ((SolidColorBrush)FindResource("PageBrush")).Color, ((SolidColorBrush)FindResource("InkBrush")).Color);
-    private void DisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.InvokeAsync(() => { if (!closed) WindowPresentation.FitToWorkArea(this, center: false); });
-    private void SystemThemeChanged(object sender, UserPreferenceChangedEventArgs e) => Dispatcher.InvokeAsync(() => { if (closed) return; if (model.Theme == "auto") App.ApplyTheme("auto"); WindowPresentation.FitToWorkArea(this, center: false); });
+    private void DisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.InvokeAsync(() => { if (!closed) WindowPresentation.FitToWorkArea(this, center: false, fixedWidth: 800); });
+    private void SystemThemeChanged(object sender, UserPreferenceChangedEventArgs e) => Dispatcher.InvokeAsync(() => { if (closed) return; if (model.Theme == "auto") App.ApplyTheme("auto"); WindowPresentation.FitToWorkArea(this, center: false, fixedWidth: 800); });
     private void Navigate(object sender, RoutedEventArgs e)
     {
         if (HomePage == null) return;
@@ -71,6 +71,8 @@ public partial class MainWindow : Window
         }));
     }
     private async void ToggleConnection(object sender, RoutedEventArgs e) => await model.ToggleAsync();
+    private void CaptureModeRequested(object sender, ModeSelectionEventArgs e) { if (e.Second) model.TunSelected = true; else model.ProxySelected = true; }
+    private void RoutingModeRequested(object sender, ModeSelectionEventArgs e) { if (e.Second) model.SplitSelected = true; else model.GlobalSelected = true; }
     private async void CheckGeo(object sender, RoutedEventArgs e) => await model.GeoAsync(false);
     private async void RepairGeo(object sender, RoutedEventArgs e) => await model.GeoAsync(true);
     private async void ResourceAction(object sender, RoutedEventArgs e) => await model.RunResourceActionAsync((string)((Button)sender).Tag);

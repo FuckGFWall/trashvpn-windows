@@ -20,7 +20,7 @@ public static class WindowPresentation
             Math.Clamp(top, workArea.Top + margin, workArea.Bottom - margin - height), width, height);
     }
 
-    public static void FitToWorkArea(Window window, bool center)
+    public static void FitToWorkArea(Window window, bool center, double? fixedWidth = null)
     {
         if (window.WindowState != WindowState.Normal) return;
         var handle = new WindowInteropHelper(window).Handle;
@@ -30,13 +30,40 @@ public static class WindowPresentation
         var scale = GetDpiForWindow(handle) / 96d;
         if (scale <= 0) scale = 1;
         var bounds = FitBounds(new Rect(info.Work.Left, info.Work.Top, info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top),
-            new Size(window.Width, window.Height), scale, center ? null : new Point(current.Left, current.Top));
+            new Size(fixedWidth ?? window.Width, window.Height), scale, center ? null : new Point(current.Left, current.Top));
         window.WindowStartupLocation = WindowStartupLocation.Manual;
-        window.MinWidth = Math.Min(window.MinWidth, bounds.Width / scale);
+        if (fixedWidth.HasValue)
+        {
+            // Temporarily relax the old lower bound before shrinking for a
+            // smaller work area. A later larger monitor restores fixedWidth.
+            window.MinWidth = 0;
+            window.MaxWidth = bounds.Width / scale;
+            window.MinWidth = window.MaxWidth;
+        }
+        else window.MinWidth = Math.Min(window.MinWidth, bounds.Width / scale);
         window.MinHeight = Math.Min(window.MinHeight, bounds.Height / scale);
         window.Width = bounds.Width / scale; window.Height = bounds.Height / scale;
         SetWindowPos(handle, 0, (int)Math.Round(bounds.Left), (int)Math.Round(bounds.Top),
             (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), 0x14); // NOZORDER | NOACTIVATE
+    }
+
+    public static void DisableMaximize(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == 0) return;
+        // Keep the native minimize button and vertical resizing border. Only
+        // remove maximize capability; WPF's CanMinimize would lock height too.
+        SetWindowLong(handle, -16, GetWindowLong(handle, -16) & ~0x10000); // WS_MAXIMIZEBOX
+        EnableMenuItem(GetSystemMenu(handle, false), 0xF030, 1); // SC_MAXIMIZE, MF_GRAYED
+        var source = HwndSource.FromHwnd(handle);
+        source?.AddHook(BlockMaximize);
+        window.Closed += (_, _) => source?.RemoveHook(BlockMaximize);
+        SetWindowPos(handle, 0, 0, 0, 0, 0, 0x37);
+    }
+    private static nint BlockMaximize(nint handle, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (message == 0x112 && (wParam.ToInt64() & 0xFFF0) == 0xF030) handled = true;
+        return 0;
     }
 
     public static (bool DarkModeApplied, bool CaptionColorsApplied) ApplyTitleBar(Window window, bool dark, Color background, Color foreground)
@@ -65,4 +92,8 @@ public static class WindowPresentation
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint window);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint window, int attribute, ref int value, int size);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(nint window, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(nint window, int index, int value);
+    [DllImport("user32.dll")] private static extern nint GetSystemMenu(nint window, [MarshalAs(UnmanagedType.Bool)] bool revert);
+    [DllImport("user32.dll")] private static extern uint EnableMenuItem(nint menu, uint item, uint flags);
 }

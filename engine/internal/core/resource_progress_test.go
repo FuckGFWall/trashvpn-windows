@@ -2,9 +2,44 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"os"
+	"strings"
 	"testing"
 )
+
+// These package tests do not run in parallel. Capture the actual JSON wire
+// events, not a simulated progress source, and restore stdout even on Fatal.
+func captureResourceProgress(t *testing.T, action func()) []ResourceProgress {
+	t.Helper()
+	file, e := os.CreateTemp(t.TempDir(), "resource-progress-")
+	if e != nil {
+		t.Fatal(e)
+	}
+	previous := os.Stdout
+	func() {
+		os.Stdout = file
+		defer func() { os.Stdout = previous; _ = file.Close() }()
+		action()
+	}()
+	data, e := os.ReadFile(file.Name())
+	if e != nil {
+		t.Fatal(e)
+	}
+	var result []ResourceProgress
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "@@RESOURCE_PROGRESS ") {
+			continue
+		}
+		var progress ResourceProgress
+		if e = json.Unmarshal([]byte(strings.TrimPrefix(line, "@@RESOURCE_PROGRESS ")), &progress); e != nil {
+			t.Fatal(e)
+		}
+		result = append(result, progress)
+	}
+	return result
+}
 
 func TestResourceByteProgress(t *testing.T) {
 	for _, total := range []int64{700000, -1} {

@@ -25,10 +25,22 @@ internal static class WindowPresentationChecks
         check(regular.Width == 900 && regular.Height == 680 && regular.Left == 510 && regular.Top == 180, "normal desktop preserves the smaller preferred size and centers it");
 
         // Native handle only: no MainWindow, Loaded handlers, tray, or engine.
-        var fixture = new Window { Width = 900, Height = 680, MinWidth = 800, MinHeight = 600, ShowActivated = false, ShowInTaskbar = false };
+        var fixture = new Window { Width = 800, Height = 680, MinWidth = 800, MaxWidth = 800, MinHeight = 600, ShowActivated = false, ShowInTaskbar = false };
         try
         {
             var handle = new WindowInteropHelper(fixture).EnsureHandle();
+            WindowPresentation.DisableMaximize(fixture);
+            var style = GetWindowLong(handle, -16);
+            check((style & 0x10000) == 0 && (style & 0x20000) != 0 && (style & 0x40000) != 0, "native maximize is disabled while minimize and vertical resizing remain available");
+            check((GetMenuState(GetSystemMenu(handle, false), 0xF030, 0) & 3) != 0, "native system-menu maximize entry is greyed out");
+            SendMessage(handle, 0x112, 0xF030, 0);
+            check(!IsZoomed(handle) && fixture.WindowState == WindowState.Normal, "native maximize command cannot bypass fixed-width window policy");
+            // Show only this engine-free, off-screen fixture to cover WPF's
+            // initial show / theme lifecycle without displaying a user client.
+            fixture.Left = fixture.Top = -20000; fixture.Show();
+            fixture.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            check((GetWindowLong(handle, -16) & 0x10000) == 0, "WPF initial show keeps the native maximize button disabled");
+            fixture.Hide();
             foreach (var theme in new[] { "dark", "light", "dark", "light" })
             {
                 App.ApplyTheme(theme);
@@ -43,18 +55,43 @@ internal static class WindowPresentationChecks
             }
             App.ApplyTheme("auto");
             check(App.IsDarkTheme == ((int?)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) == 0), "automatic title-bar theme resolves the actual system setting without modifying it");
-            WindowPresentation.FitToWorkArea(fixture, center: true);
+            WindowPresentation.FitToWorkArea(fixture, center: true, fixedWidth: 800);
+            check(fixture.MinWidth == fixture.Width && fixture.MaxWidth == fixture.Width && fixture.Width <= 800, "work-area fitting locks horizontal minimum and maximum to the same width");
+            check((GetWindowLong(handle, -16) & 0x10000) == 0, "theme changes and work-area fitting cannot re-enable maximize");
+            var constraints = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMinMax>());
+            try
+            {
+                // Windows normally seeds positive default maximum tracking
+                // limits before calling WndProc; a zero-filled struct would
+                // incorrectly force WPF's min(existingMax, MaxWidth) to zero.
+                Marshal.StructureToPtr(new NativeMinMax { MaxTrack = new NativePoint { X = 32767, Y = 32767 } }, constraints, false);
+                SendMessage(handle, 0x24, 0, constraints); // WM_GETMINMAXINFO
+                var limits = Marshal.PtrToStructure<NativeMinMax>(constraints);
+                check(limits.MinTrack.X > 0 && limits.MinTrack.X == limits.MaxTrack.X && limits.MinTrack.Y < limits.MaxTrack.Y, "native resize constraints lock width but leave a vertical size range");
+            }
+            finally { Marshal.FreeHGlobal(constraints); }
             var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
             var gotArea = GetMonitorInfo(MonitorFromWindow(handle, 2), ref info);
             var gotBounds = GetWindowRect(handle, out var native);
             check(gotArea && gotBounds && native.Left >= info.Work.Left && native.Top >= info.Work.Top && native.Right <= info.Work.Right && native.Bottom <= info.Work.Bottom, "native window-frame bounds fit the current machine's actual monitor work area");
+            var previousHeight = fixture.Height; var previousWidth = fixture.Width;
+            fixture.Height -= 20;
+            WindowPresentation.FitToWorkArea(fixture, center: false, fixedWidth: 800);
+            check(fixture.Width == previousWidth && Math.Abs(fixture.Height - previousHeight + 20) < .1, "fixed horizontal width still permits vertical size changes");
         }
         finally { fixture.Close(); App.ApplyTheme("light"); }
     }
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeMinMax { public NativePoint Reserved, MaxSize, MaxPosition, MinTrack, MaxTrack; }
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
     [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint window, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Auto)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(nint window, out NativeRect rect);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(nint window, int index);
+    [DllImport("user32.dll")] private static extern nint GetSystemMenu(nint window, [MarshalAs(UnmanagedType.Bool)] bool revert);
+    [DllImport("user32.dll")] private static extern uint GetMenuState(nint menu, uint item, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsZoomed(nint window);
 }

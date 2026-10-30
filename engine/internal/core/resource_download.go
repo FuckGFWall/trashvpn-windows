@@ -82,6 +82,7 @@ func downloadBinaryCandidate(ctx context.Context, dir string, client *http.Clien
 	if e != nil {
 		return "", e
 	}
+	ReportResourceProgress("core", "downloaded", "mihomo.zip", int64(len(data)), int64(len(data)))
 	if len(data) > 128<<20 {
 		return "", fmt.Errorf("内核压缩包过大")
 	}

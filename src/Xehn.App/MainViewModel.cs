@@ -506,14 +506,19 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var text = progress.Phase switch
             {
                 "download" => $"{progress.File} · {progress.Done / 1048576.0:0.00} MB" + (progress.Total > 0 ? $" / {progress.Total / 1048576.0:0.00} MB（{value:0}%）" : ""),
+                "downloaded" => "下载完成，正在校验…",
                 "validate" => "下载完成，正在校验…",
                 "staged" => "下载完成，等待 VPN 断开后替换。",
                 "installed" => progress.Resource == "core" ? "mihomo 已替换成功。" : "GeoFiles 已替换成功。",
                 "error" => "GeoFiles 替换未完成，请检查后重试。",
                 _ => "正在处理…"
             };
-            if (progress.Resource == "core") { CoreDownloadProgress = value; CoreDownloadIndeterminate = progress.Total <= 0; CoreResourceMessage = text; }
-            if (progress.Resource == "geo") { GeoDownloadProgress = value; GeoDownloadIndeterminate = progress.Total <= 0; GeoResourceMessage = text; }
+            // The bar represents file transfer only. Keep the workflow lock
+            // during verification / installation, but do not leave a full or
+            // spinning download bar behind after EOF (including unknown sizes).
+            var downloading = progress.Phase == "download" && (progress.Total <= 0 || progress.Done < progress.Total);
+            if (progress.Resource == "core") { CoreDownloadProgress = value; CoreDownloadActive = downloading; CoreDownloadIndeterminate = downloading && progress.Total <= 0; CoreResourceMessage = text; }
+            if (progress.Resource == "geo") { GeoDownloadProgress = value; GeoDownloadActive = downloading; GeoDownloadIndeterminate = downloading && progress.Total <= 0; GeoResourceMessage = text; }
             Changed("");
         });
     }

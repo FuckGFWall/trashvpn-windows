@@ -145,8 +145,14 @@ internal static class WorkflowChecks
         check(resources.Calls.Last() == "resources-download-geo-proxy" && model.CanToggleFromTray, "automatic stale GeoFiles use explicit VPN proxy without blocking disconnect");
         resources.EmitProgress(new("geo", "download", "geosite.dat", 256, 1024));
         check(model.GeoDownloadActive && !model.GeoDownloadIndeterminate && model.GeoDownloadProgress == 25, "GeoFiles progress uses real byte ratio in its own card");
+        resources.EmitProgress(new("geo", "download", "geosite.dat", 1024, 1024));
+        check(!model.GeoDownloadActive && !model.ResourceOperation.IsCompleted, "GeoFiles bar hides on file completion without waiting for the resource operation");
         resources.EmitProgress(new("geo", "download", "geoip.metadb", 512, 0));
-        check(model.GeoDownloadIndeterminate && model.GeoDownloadProgress == 0, "missing content length uses indeterminate progress, never a fake percentage");
+        check(model.GeoDownloadActive && model.GeoDownloadIndeterminate && model.GeoDownloadProgress == 0, "next GeoFiles file restarts indeterminate progress when content length is unknown");
+        resources.EmitProgress(new("geo", "downloaded", "geoip.metadb", 0, 0));
+        check(!model.GeoDownloadActive && !model.GeoDownloadIndeterminate && !model.ResourceOperation.IsCompleted, "unknown-length file EOF also hides its bar while validation remains pending");
+        resources.EmitProgress(new("geo", "validate", "", 0, 0));
+        check(!model.GeoDownloadActive && model.GeoResourceMessage.Contains("校验") && model.GeoResourceSuccessText == "", "GeoFiles validation has text only, not a lingering bar or false success");
         resources.CompleteDownload(); PumpUntil(() => model.ResourceOperation.IsCompleted);
         check(model.GeoPending && model.GeoUpdated == "2026-10-20" && !resources.Calls.Contains("resources-apply"), "connected GeoFiles download is staged without changing live update date");
         check(model.GeoResourceMessage.Contains("等待") && !model.GeoResourceMessage.Contains("成功") && !model.GeoDownloadActive, "staged download is not misreported as a successful replacement");
@@ -170,6 +176,10 @@ internal static class WorkflowChecks
         var coreDownload = model.RunResourceActionAsync("resources-download-core");
         resources.EmitProgress(new("core", "download", "mihomo.zip", 750, 1000));
         check(model.CoreDownloadActive && !model.CoreDownloadIndeterminate && model.CoreDownloadProgress == 75 && !model.GeoDownloadActive, "core download progress is separate from GeoFiles progress");
+        resources.EmitProgress(new("core", "download", "mihomo.zip", 1000, 1000));
+        check(!model.CoreDownloadActive && !coreDownload.IsCompleted, "core bar hides as soon as known-length file transfer completes");
+        resources.EmitProgress(new("core", "validate", "", 0, 0));
+        check(!model.CoreDownloadActive && !model.CanToggleFromTray && model.CoreResourceMessage.Contains("校验"), "core validation keeps the install lock but no download bar");
         resources.CompleteCoreDownload(); PumpUntil(() => coreDownload.IsCompleted);
         check(model.CoreVersion == "9.0.0" && !model.CoreNeedsDownload, "validated core install refreshes displayed version");
         check(model.CoreResourceMessage.Contains("成功") && !model.CoreDownloadActive, "core card confirms successful install / replacement");
@@ -180,6 +190,7 @@ internal static class WorkflowChecks
         using var retry = new MainViewModel(retryEngine, new FakeDesktop(), retryResources);
         retry.InitializeResourcesAsync().GetAwaiter().GetResult(); retryEngine.Connected = true;
         retry.RefreshAsync().GetAwaiter().GetResult(); retry.RefreshAsync().GetAwaiter().GetResult(); retry.RefreshAsync().GetAwaiter().GetResult();
+        check(!retry.GeoDownloadActive && !retry.GeoDownloadIndeterminate, "failed resource download never leaves a progress bar active");
         check(retryResources.Calls.Count(c => c == "resources-download-geo-proxy") == 1, "failed automatic update does not loop on each poll");
         retryEngine.SessionId++; retry.RefreshAsync().GetAwaiter().GetResult();
         check(retryResources.Calls.Count(c => c == "resources-download-geo-proxy") == 2, "new VPN session can retry failed automatic update");

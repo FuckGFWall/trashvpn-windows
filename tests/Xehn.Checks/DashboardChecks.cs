@@ -30,6 +30,14 @@ internal static class DashboardChecks
         }
         CheckBaseline(null, "new chart always draws a full-width horizontal zero baseline");
         CheckBaseline(series, "measured zero traffic keeps the horizontal baseline visible");
+        var peakTime = new ManualTimeProvider(); var peakSeries = new TrafficSeries(peakTime);
+        peakSeries.Add(0); peakTime.Advance(20); peakSeries.Add(8192); peakTime.Advance(20); peakSeries.Add(0);
+        var peakChart = new TrafficChart { Width = 200, Height = 42, Series = peakSeries };
+        peakChart.Measure(new Size(200, 42)); peakChart.Arrange(new Rect(0, 0, 200, 42)); peakChart.UpdateLayout();
+        var peakBitmap = new RenderTargetBitmap(200, 42, 96, 96, PixelFormats.Pbgra32); peakBitmap.Render(peakChart);
+        var peakPixels = new byte[200 * 42 * 4]; peakBitmap.CopyPixels(peakPixels, 800, 0);
+        check(peakPixels[(40 * 200 + 44) * 4 + 3] == 0 && peakPixels[(2 * 200 + 44) * 4 + 3] > 0, "nonzero traffic peak has no extra horizontal line underneath it");
+        check(peakPixels[(40 * 200 + 150) * 4 + 3] > 0, "zero-traffic part of the same path continues horizontally outside the peak");
         time.Advance(2); series.Add(8192); time.Advance(2); series.Add(0);
         check(series.Snapshot().Length == 3 && series.HasVisibleTraffic, "a measured zero preserves preceding traffic instead of clearing it");
         var before = TrafficChart.Project(series, series.NowSeconds, 300, 42);

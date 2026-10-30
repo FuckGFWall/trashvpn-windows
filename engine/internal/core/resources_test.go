@@ -55,11 +55,31 @@ func TestGeoStagingAndDeferredApply(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
+		w.(http.Flusher).Flush() // Explicit unknown Content-Length.
 		_, _ = w.Write(bytes.Repeat([]byte{2}, 600*1024))
 	}))
 	defer server.Close()
-	if e := StageGeoData(context.Background(), dir, server.Client(), server.URL+"/", now); e != nil {
-		t.Fatal(e)
+	progress := captureResourceProgress(t, func() {
+		if e := StageGeoData(context.Background(), dir, server.Client(), server.URL+"/", now); e != nil {
+			t.Fatal(e)
+		}
+	})
+	for _, asset := range geoAssets {
+		started, completed := false, false
+		for _, sample := range progress {
+			if sample.File == asset.Name && sample.Phase == "download" && sample.Total == 0 {
+				started = true
+			}
+			if sample.File == asset.Name && sample.Phase == "downloaded" {
+				completed = started
+			}
+		}
+		if !completed {
+			t.Fatalf("unknown-length %s did not signal file EOF", asset.Name)
+		}
+	}
+	if len(progress) == 0 || progress[len(progress)-1].Phase != "staged" {
+		t.Fatal("download completion must precede the final staged state")
 	}
 	if e := StageGeoData(context.Background(), dir, server.Client(), server.URL+"/", now); e != nil || requests != 2 {
 		t.Fatal("duplicate pending download")
@@ -145,9 +165,25 @@ func TestCoreCandidateDownloadAndPermanentOldRemoval(t *testing.T) {
 	dir := t.TempDir()
 	target := CoreInDir(dir)
 	_ = os.WriteFile(target, []byte("old core"), 0600)
-	candidate, e := downloadBinaryCandidate(context.Background(), dir, server.Client(), server.URL+"/release")
-	if e != nil {
-		t.Fatal(e)
+	var candidate string
+	var e error
+	progress := captureResourceProgress(t, func() {
+		candidate, e = downloadBinaryCandidate(context.Background(), dir, server.Client(), server.URL+"/release")
+		if e != nil {
+			t.Fatal(e)
+		}
+	})
+	downloaded := false
+	for _, sample := range progress {
+		if sample.Resource == "core" && sample.Phase == "downloaded" && sample.Done == int64(archive.Len()) {
+			downloaded = true
+		}
+		if sample.Phase == "validate" && !downloaded {
+			t.Fatal("core validation began without signalling completed file transfer")
+		}
+	}
+	if !downloaded {
+		t.Fatal("core transfer never signalled EOF")
 	}
 	if e = InstallValidatedBinary(dir, candidate, true); e == nil {
 		t.Fatal("running core replaced")

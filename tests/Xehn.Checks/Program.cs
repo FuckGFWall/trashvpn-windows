@@ -54,10 +54,11 @@ internal static class Program
         IconChecks.Run(Check, outDir);
         WorkflowChecks.Run(Check, outDir);
         DashboardChecks.Run(Check);
+        ModeSwitchChecks.Run(Check);
         WindowPresentationChecks.Run(Check);
         var window = new MainWindow();
         var root = (FrameworkElement)window.Content;
-        double viewWidth = 900, viewHeight = 640;
+        double viewWidth = 800, viewHeight = 640;
         void Layout() { app.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle); root.Measure(new Size(viewWidth, viewHeight)); root.Arrange(new Rect(0, 0, viewWidth, viewHeight)); root.UpdateLayout(); }
         void Snapshot(string name)
         {
@@ -70,12 +71,12 @@ internal static class Program
             var png = new PngBitmapEncoder(); png.Frames.Add(BitmapFrame.Create(bitmap));
             using var stream = File.Create(Path.Combine(outDir, name + ".png")); png.Save(stream);
         }
-        Layout();
+        Layout(); Layout();
         var vm = (MainViewModel)window.DataContext;
         Check(vm.Upload == "" && vm.Download == "", "initial UI has no fake traffic");
         Check(((FrameworkElement)window.FindName("PageHeader")).Visibility == Visibility.Collapsed, "home header removed");
         Check(window.FindName("PageCaption") == null && !Find<TextBlock>(root).Any(t => t.Text == "WARP, SIMPLIFIED."), "decorative subtitles removed");
-        Check(window.Width == 900 && window.Height == 680 && window.MinWidth == 800 && window.MinHeight == 600 && ((Grid)root).ColumnDefinitions[0].ActualWidth == 144, "further reduced default and minimum window dimensions");
+        Check(window.Width == 800 && window.MinWidth == 800 && window.MaxWidth == 800 && window.Height == 680 && window.MinHeight == 600 && ((Grid)root).ColumnDefinitions[0].ActualWidth == 144, "800-DIP fixed width preserves compact rail and height adjustment");
         Check(((TextBlock)window.FindName("PageTitle")).FontSize == 24 && window.FontSize == 14, "Settings / About / Logs headings shrink while body font stays unchanged");
         Check(((RadioButton)window.FindName("HomeNav")).ActualHeight == 44 && ((RadioButton)window.FindName("HomeNav")).ActualWidth is >= 118 and <= 120, "compact sidebar selection background");
         var brand = (FrameworkElement)window.FindName("BrandGroup"); var rail = (Border)window.FindName("Sidebar");
@@ -92,15 +93,27 @@ internal static class Program
         Check(Find<FrameworkElement>(home).All(e => e.ToolTip == null), "home controls have no hover reminders, including split routing and power");
         bool HasScrollAncestor(DependencyObject node) { for (var p = VisualTreeHelper.GetParent(node); p != null; p = VisualTreeHelper.GetParent(p)) if (p is ScrollViewer) return true; return false; }
         Check(!HasScrollAncestor(home) && ((ScrollViewer)window.FindName("PageScroller")).Visibility == Visibility.Collapsed, "home is outside the scrolling region, not just hiding its scrollbar");
-        Check(((Viewbox)window.FindName("HomeViewport")).ActualHeight <= viewport.ActualHeight, "home scales down to fit without introducing page scrolling");
+        Check(((FrameworkElement)window.FindName("HomeViewport")).ActualHeight <= viewport.ActualHeight, "home scales down to fit without introducing page scrolling");
+        foreach (var name in new[] { "IpCard", "RegionCard", "LatencyCard" })
+        {
+            var card = (Border)window.FindName(name); var texts = Find<TextBlock>(card).ToArray();
+            Check(card.ActualHeight == 40 && texts.Length == 2 && Math.Abs(texts[0].TranslatePoint(new Point(0, texts[0].ActualHeight / 2), card).Y - texts[1].TranslatePoint(new Point(0, texts[1].ActualHeight / 2), card).Y) < 1, name + " is a flat single-line label / value card");
+        }
+        Check(Find<TextBlock>((Border)window.FindName("RegionCard")).First().Text == "国家", "country information label contains only 国家");
+        var trafficCard = (FrameworkElement)window.FindName("TrafficCard");
+        Check(viewport.ActualHeight - trafficCard.TranslatePoint(new Point(0, trafficCard.ActualHeight), viewport).Y < 2 && ((FrameworkElement)window.FindName("ConnectionCard")).ActualHeight >= 378, "home gives reclaimed info-row height to connection card rather than leaving a bottom gap");
         var prep = (FrameworkElement)window.FindName("PreparationPanel"); var modes = (FrameworkElement)window.FindName("ModeSelectors");
+        Check(modes.Width == 440 && Find<ModeSwitch>(modes).Count() == 2 && Find<ModeSwitch>(modes).All(s => s.ActualHeight == 46 && s.ActualWidth == 208), "both mode selectors are taller and slightly narrower");
         Check(modes.TranslatePoint(new Point(), home).Y - prep.TranslatePoint(new Point(0, prep.ActualHeight), home).Y >= 40, "mode sliders leave more space below the preparation progress area");
         var power = (Button)window.FindName("PowerButton");
         Check(power.ActualWidth == 116 && ((Viewbox)power.Template.FindName("PowerGlyph", power)).Width == 54, "smaller power button preserves the original white power glyph size");
         Snapshot("home-light");
         viewWidth = 800; viewHeight = 560; vm.Notice = string.Concat(Enumerable.Repeat("较长的连接提示。", 16)); Layout();
         Check(((FrameworkElement)window.FindName("TrafficCard")).TranslatePoint(new Point(0, ((FrameworkElement)window.FindName("TrafficCard")).ActualHeight), viewport).Y <= viewport.ActualHeight + .1, "minimum window with a long notice still fits every home card");
-        Snapshot("home-minimum"); viewWidth = 900; viewHeight = 640; vm.Notice = ""; Layout();
+        Snapshot("home-minimum"); viewWidth = 800; viewHeight = 640; vm.Notice = ""; Layout();
+        viewHeight = 760; Layout(); Layout();
+        Check(viewport.ActualHeight - trafficCard.TranslatePoint(new Point(0, trafficCard.ActualHeight), viewport).Y < 2 && ((FrameworkElement)window.FindName("ConnectionCard")).ActualHeight > 500, "taller window expands the connection area without a blank strip below traffic");
+        Snapshot("home-tall"); viewHeight = 640; Layout(); Layout();
         foreach (var page in new[] { "Settings", "About", "Logs", "Home" })
         {
             var nav = Find<RadioButton>(root).Single(b => (string?)b.Tag == page);
@@ -144,6 +157,7 @@ internal static class Program
                 var titles = about.Children.OfType<Border>().Select(c => Find<TextBlock>(c).First()).ToArray();
                 Check(titles.All(t => t.FontSize == 20 && t.FontWeight == FontWeights.SemiBold && t.FontFamily.Equals(titles[0].FontFamily)) && ((TextBlock)window.FindName("ProductVersion")).FontSize == 18, "all four About card headings use the same font and weight; body size retained");
                 Check(about.Children.OfType<Border>().All(c => c.Padding == new Thickness(16, 10, 16, 10) && c.MinHeight == 156 && c.ActualWidth <= 314) && about.ActualHeight < 360, "About cards are further narrowed and shorter, without large empty padding");
+                Check(Math.Abs(((Border)window.FindName("ProductCard")).TranslatePoint(new Point(), root).X - ((TextBlock)window.FindName("PageTitle")).TranslatePoint(new Point(), root).X) < 1 && Math.Abs(about.ActualWidth - 600) < 1, "About cards fill the fixed-width content column and align with the page heading");
                 Check(window.FindName("CoreDownloadBar") is ProgressBar && window.FindName("GeoDownloadBar") is ProgressBar && window.FindName("CoreResourceStatus") is TextBlock && window.FindName("GeoResourceStatus") is TextBlock, "each resource card has its own download bar and replacement-status text");
                 var project = Find<TextBlock>((Border)window.FindName("ProductCard")).SelectMany(t => t.Inlines.OfType<System.Windows.Documents.Hyperlink>()).Single();
                 Check(project.NavigateUri.AbsoluteUri == "https://github.com/FuckGFWall/trashvpn-windows" && !new System.Windows.Documents.TextRange(project.ContentStart, project.ContentEnd).Text.Contains("https://"), "project hyperlink hides raw URL and targets this repository");
@@ -216,7 +230,10 @@ internal static class Program
             for (var i = 0; i < 32; i++) { model.UploadSeries.Add(i % 7 == 0 ? 0 : 3000 + 9000 * (1 + Math.Sin(i * .55))); model.DownloadSeries.Add(i % 8 == 0 ? 0 : 10000 + 45000 * (1 + Math.Cos(i * .45))); time.Advance(2); }
             model.InitializePreparation();
             preview.Emit("@@XEHN {\"type\":\"progress\",\"phase\":\"scan\",\"text\":\"验证隧道 · 完成 4/14 · 可用 2/2 · 跳过 10\\n正在准备并复用已有账号与优选结果\",\"done\":4,\"total\":14}");
+            Layout(); var capture = (ModeSwitch)window.FindName("CaptureSwitch"); var routing = (ModeSwitch)window.FindName("RoutingSwitch");
+            var capturePixels = ModeSwitchChecks.Pixels(capture); var routingPixels = ModeSwitchChecks.Pixels(routing);
             var connect = model.ToggleAsync(); Layout();
+            Check(capturePixels.SequenceEqual(ModeSwitchChecks.Pixels(capture)) && routingPixels.SequenceEqual(ModeSwitchChecks.Pixels(routing)), "VPN connect busy state preserves both selector backgrounds pixel-for-pixel");
             Snapshot("home-connecting");
             var glyph = (Viewbox)power.Template.FindName("PowerGlyph", power); var ring = (ProgressRing)power.Template.FindName("PowerProgressRing", power);
             Check(glyph.Visibility == Visibility.Collapsed && ring.IsActive && ((ProgressRing)window.FindName("StatusProgressRing")).IsActive, "connection replaces power glyph with a ring and shows a small sidebar ring");
@@ -226,7 +243,14 @@ internal static class Program
             Snapshot("home-verifying");
             preview.Emit("@@XEHN {\"type\":\"connection\",\"state\":\"verified\"}"); preview.Complete(); DashboardPreviewEngine.Wait(() => connect.IsCompleted, Layout); connect.GetAwaiter().GetResult(); Layout();
             Check(!ring.IsActive && glyph.Visibility == Visibility.Visible, "verified connection restores the unchanged white power glyph");
-            preview.Connected = false; time.Advance(2); model.RefreshAsync().GetAwaiter().GetResult(); Snapshot("home-traffic-retained");
+            Snapshot("home-connected");
+            var ipValue = Find<TextBlock>((Border)window.FindName("IpCard")).Last();
+            Check(ipValue.Text == "203.0.113.42" && ipValue.ActualWidth > 90 && ipValue.TextWrapping == TextWrapping.NoWrap, "connected IPv4 fits beside its label on the single information row");
+            capturePixels = ModeSwitchChecks.Pixels(capture); routingPixels = ModeSwitchChecks.Pixels(routing);
+            var disconnect = model.ToggleAsync(); Layout();
+            Check(capturePixels.SequenceEqual(ModeSwitchChecks.Pixels(capture)) && routingPixels.SequenceEqual(ModeSwitchChecks.Pixels(routing)), "VPN disconnect busy state also preserves selector pixels without flashing");
+            preview.Connected = false; preview.Complete(); DashboardPreviewEngine.Wait(() => disconnect.IsCompleted, Layout); disconnect.GetAwaiter().GetResult();
+            time.Advance(2); model.RefreshAsync().GetAwaiter().GetResult(); Snapshot("home-traffic-retained");
             time.Advance(12); Snapshot("home-traffic-aged");
             window.DataContext = vm;
         }
@@ -238,11 +262,18 @@ internal static class Program
             var coreDownload = previewModel.RunResourceActionAsync("resources-download-core");
             Layout(); Snapshot("about-core-download-light");
             Check(((ProgressBar)window.FindName("CoreDownloadBar")).Visibility == Visibility.Visible && ((ProgressBar)window.FindName("CoreDownloadBar")).Value == 50, "core card renders live byte progress");
+            PreviewResources.Emit(new("core", "downloaded", "mihomo.zip", 2097152, 2097152)); Layout();
+            Check(((ProgressBar)window.FindName("CoreDownloadBar")).Visibility == Visibility.Collapsed && !coreDownload.IsCompleted, "actual core progress control disappears immediately at file EOF");
+            PreviewResources.Emit(new("core", "validate", "", 0, 0)); Layout(); Snapshot("about-core-validating");
+            Check(((ProgressBar)window.FindName("CoreDownloadBar")).Visibility == Visibility.Collapsed && previewModel.CoreResourceDetail.Contains("校验"), "core validation does not leave an indeterminate progress control behind");
             PreviewResources.Complete(previewModel, coreDownload, Layout);
             var geoDownload = previewModel.RunResourceActionAsync("resources-download-geo");
             Layout(); Snapshot("about-geo-download-light");
             Check(((ProgressBar)window.FindName("GeoDownloadBar")).Visibility == Visibility.Visible && ((TextBlock)window.FindName("CoreResourceStatus")).Text.Contains("成功"), "GeoFiles card renders progress while installed core status stays visible");
+            PreviewResources.Emit(new("geo", "downloaded", "geosite.dat", 0, 0)); Layout();
+            Check(((ProgressBar)window.FindName("GeoDownloadBar")).Visibility == Visibility.Collapsed && !geoDownload.IsCompleted, "actual GeoFiles progress control disappears at unknown-size EOF");
             PreviewResources.Complete(previewModel, geoDownload, Layout);
+            Layout(); Check(((ProgressBar)window.FindName("GeoDownloadBar")).Visibility == Visibility.Collapsed && ((ProgressBar)window.FindName("CoreDownloadBar")).Visibility == Visibility.Collapsed, "completed resource cards retain confirmation text, not progress bars");
             Snapshot("about-resources-updated");
             previewModel.RunResourceActionAsync("resources-info").GetAwaiter().GetResult();
             Snapshot("about-geofiles-checked");
@@ -274,7 +305,7 @@ internal static class Program
         public void Emit(string line) => log?.Invoke(line);
         public void Complete() => active!.TrySetResult();
         public Task CancelAsync() { active?.TrySetCanceled(); return Task.CompletedTask; }
-        public Task<Session> ReadSessionAsync() => Task.FromResult(new Session(Connected));
+        public Task<Session> ReadSessionAsync() => Task.FromResult(new Session(Connected, "203.0.113.42", "新加坡", "SIN", 34));
         public Task<(double Up, double Down)> TrafficAsync(int port) => Task.FromResult((0d, 0d));
         public void Dispose() { }
         public static void Wait(Func<bool> ready, Action layout) { var deadline = DateTime.UtcNow.AddSeconds(5); while (!ready()) { if (DateTime.UtcNow > deadline) throw new TimeoutException("Dashboard fixture did not settle"); layout(); Thread.Sleep(1); } }
@@ -286,10 +317,12 @@ internal static class Program
         private TaskCompletionSource<ResourceInfo>? pending;
         private ResourceInfo current = new("1.19.33", false, "全部协议检查通过", "2026-10-20", true, false);
         private string command = "";
+        private Action<ResourceProgress>? report;
         public PreviewResources() => active = this;
         public Task<ResourceInfo> RunAsync(string command, Action<string> log, Action<ResourceProgress>? progress = null)
         {
             this.command = command;
+            report = progress;
             if (command.Contains("download", StringComparison.Ordinal))
             {
                 pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -299,6 +332,7 @@ internal static class Program
             if (command == "resources-apply") { current = current with { GeoPending = false, GeoNeedsDownload = false, GeoUpdated = "2026-10-30" }; progress?.Invoke(new("geo", "installed", "", 1, 1)); }
             return Task.FromResult(current);
         }
+        public static void Emit(ResourceProgress progress) => active!.report?.Invoke(progress);
         public static void Complete(MainViewModel model, Task task, Action layout)
         {
             var self = active!;

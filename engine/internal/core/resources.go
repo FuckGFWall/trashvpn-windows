@@ -108,6 +108,7 @@ func StageGeoData(ctx context.Context, dir string, client *http.Client, base str
 		if _, e = fetchToFile(ctx, client, base+a.Name, filepath.Join(stage, a.Name), a.Min, func(done, total int64) { ReportResourceProgress("geo", "download", a.Name, done, total) }); e != nil {
 			return e
 		}
+		ReportResourceProgress("geo", "downloaded", a.Name, 0, 0)
 		p.Hashes[a.Name], e = hashFile(filepath.Join(stage, a.Name))
 		if e != nil {
 			return e
