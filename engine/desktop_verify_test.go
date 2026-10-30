@@ -38,6 +38,30 @@ func TestDesktopHTTPSCancellationWinsOverRacingSuccess(t *testing.T) {
 	}
 }
 
+func TestDesktopHTTPSPreservesFallbackSourcesAndMetadata(t *testing.T) {
+	for _, source := range []string{"meta", "fallback"} {
+		client := &http.Client{Transport: desktopRoundTrip(func(r *http.Request) (*http.Response, error) {
+			if r.URL.String() == "https://speed.cloudflare.com/meta" {
+				if r.Header.Get("Referer") != metaReferer {
+					t.Error("metadata Referer missing")
+				}
+				if source == "meta" {
+					return desktopResponse(r, 200, `{"clientIp":"192.0.2.8","country":"US","colo":{"iata":"LAX","city":"Los Angeles"}}`), nil
+				}
+				return desktopResponse(r, 403, "refused"), nil
+			}
+			if r.URL.String() == "https://api.ipify.org" || source == "meta" {
+				return desktopResponse(r, 503, "unavailable"), nil
+			}
+			return desktopResponse(r, 200, "ip=192.0.2.8\nloc=US\ncolo=LAX\n"), nil
+		})}
+		probe, err := verifyDesktopFamily(context.Background(), client, famV4, dataPlaneSources, nil)
+		if err != nil || probe.ExitIP != "192.0.2.8" || probe.Country != "US" || probe.Colo != "LAX" || source == "meta" && probe.NodeCity != "Los Angeles" {
+			t.Fatalf("existing %s metadata / fallback lost: %v %+v", source, err, probe)
+		}
+	}
+}
+
 func TestDesktopHTTPSFastProviderCancelsAndJoinsSlowProvider(t *testing.T) {
 	started := make(chan struct{})
 	var exited atomic.Bool

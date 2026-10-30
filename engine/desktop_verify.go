@@ -19,13 +19,15 @@ func verifyDesktopMode(ctx context.Context, port int, family string) (clientStat
 	transport := &http.Transport{Proxy: http.ProxyURL(proxy)}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 6 * time.Second}
-	urls := []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"}
+	// Keep all existing fallback providers and metadata, not just the fastest
+	// two. A provider refusal must not doom an otherwise usable tunnel.
+	urls := dataPlaneSources
 	v6URLs := []string{"https://[2606:4700:4700::1111]/cdn-cgi/trace"}
 	return verifyDesktopFamily(ctx, client, family, urls, v6URLs)
 }
 
 func verifyDesktopFamily(ctx context.Context, client *http.Client, family string, urls, v6URLs []string) (clientState, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, probeBudget)
 	defer cancel()
 	if family == famV6 {
 		return verifyDesktopIPv6(ctx, client, v6URLs)
@@ -117,6 +119,9 @@ func verifyDesktopURL(ctx context.Context, client *http.Client, target string) (
 	if req.URL.Scheme != "https" {
 		return clientState{}, fmt.Errorf("数据面验证必须使用 HTTPS")
 	}
+	if strings.HasPrefix(target, "https://speed.cloudflare.com/") {
+		req.Header.Set("Referer", metaReferer)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return clientState{}, err
@@ -132,7 +137,8 @@ func verifyDesktopURL(ctx context.Context, client *http.Client, target string) (
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return clientState{}, fmt.Errorf("HTTPS HTTP %d", resp.StatusCode)
 	}
-	probe := clientState{}
+	meta := parseMeta(string(body))
+	probe := clientState{ExitIP: meta.ip, Country: meta.loc, Colo: meta.colo, NodeCity: meta.coloCity}
 	for _, line := range strings.Split(string(body), "\n") {
 		if value, ok := strings.CutPrefix(line, "ip="); ok {
 			probe.ExitIP = strings.TrimSpace(value)
@@ -141,8 +147,12 @@ func verifyDesktopURL(ctx context.Context, client *http.Client, target string) (
 	if net.ParseIP(strings.TrimSpace(string(body))) != nil {
 		probe.ExitIP = strings.TrimSpace(string(body))
 	}
-	probe.Country = traceField(string(body), "loc")
-	probe.Colo = traceField(string(body), "colo")
+	if country := traceField(string(body), "loc"); country != "" {
+		probe.Country = country
+	}
+	if colo := traceField(string(body), "colo"); colo != "" {
+		probe.Colo = colo
+	}
 	return probe, nil
 }
 
