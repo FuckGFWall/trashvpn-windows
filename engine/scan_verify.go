@@ -14,6 +14,7 @@ type scanProgressMsg struct {
 	stage, detail                                string
 	completed, succeeded, skipped, total, target int
 	finished                                     bool
+	budgetReached                                bool
 }
 
 type probeStepKey struct{}
@@ -56,6 +57,14 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 	create func() (tunnel, error), probe candidateProbe) ([]endpointResult, error) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+	if opts.scanBudget > 0 {
+		emit(stepMsg{done: true, label: "Verification budget", summary: fmt.Sprintf("%s total, %s per candidate", opts.scanBudget, opts.candidateBudget)})
+	}
+	if opts.scanBudget > 0 {
+		var cancelBudget context.CancelFunc
+		ctx, cancelBudget = context.WithTimeout(ctx, opts.scanBudget)
+		defer cancelBudget()
+	}
 	results := make([]endpointResult, len(targets))
 	var mu sync.Mutex
 	completed, succeeded := 0, 0
@@ -76,7 +85,8 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 			skipped = len(targets) - completed
 		}
 		emit(scanProgressMsg{stage: "verify", detail: strings.Join(steps, " / "), completed: completed,
-			succeeded: succeeded, skipped: skipped, total: len(targets), target: opts.earlyStop, finished: finished})
+			succeeded: succeeded, skipped: skipped, total: len(targets), target: opts.earlyStop, finished: finished,
+			budgetReached: finished && ctx.Err() == context.DeadlineExceeded && parent.Err() == nil})
 	}
 	mu.Lock()
 	report(false)
@@ -90,7 +100,16 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 				report(false)
 			}
 		})
-		r := probe(workerCtx, tn, targets[i])
+		candidateCtx := workerCtx
+		cancelCandidate := func() {}
+		if opts.candidateBudget > 0 {
+			candidateCtx, cancelCandidate = context.WithTimeout(workerCtx, opts.candidateBudget)
+		}
+		r := probe(candidateCtx, tn, targets[i])
+		if candidateCtx.Err() != nil {
+			r = endpointResult{ip: targets[i].ip}
+		}
+		cancelCandidate()
 		mu.Lock()
 		defer mu.Unlock()
 		delete(active, i)
@@ -129,6 +148,13 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 		summary: fmt.Sprintf("completed %d/%d, usable %d, skipped %d", completed, len(targets), succeeded, len(targets)-completed)})
 	if parent.Err() != nil {
 		return nil, parent.Err()
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		if succeeded == 0 {
+			return nil, fmt.Errorf("优选验证达到 %s 时间预算，未找到可用节点；请检查网络或重试", opts.scanBudget)
+		}
+		emit(stepMsg{done: true, label: "Scan budget", summary: fmt.Sprintf("reached %s; retaining %d verified endpoint(s)", opts.scanBudget, succeeded)})
+		return results, nil
 	}
 	if err != nil && !(ctx.Err() != nil && opts.earlyStop > 0 && succeeded >= opts.earlyStop) {
 		return nil, err

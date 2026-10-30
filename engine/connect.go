@@ -236,9 +236,9 @@ func runConnectCmd(ctx context.Context, opts options) error {
 	// the whole endpoint space — minutes, not seconds. Tell the user before
 	// the silence so the click does not look dead.
 	if opts.scanNow {
-		stageMsg(fmt.Sprintf("[%s] 重新扫描端点，约 1-2 分钟，请稍候…", label))
+		stageMsg(fmt.Sprintf("[%s] 重新优选端点，请稍候…", label))
 	} else if _, ok := cachedScanFor(scanKeyFor(opts), opts.ipv6); !ok {
-		stageMsg(fmt.Sprintf("[%s] 首次使用：注册账号并扫描端点，约 1-2 分钟，请稍候…", label))
+		stageMsg(fmt.Sprintf("[%s] 尚无有效端点缓存，开始优选…", label))
 	}
 	stageMsg(fmt.Sprintf("[%s] 扫描 WARP 端点…", label))
 	results, run, err := runCachedScan(ctx, opts)

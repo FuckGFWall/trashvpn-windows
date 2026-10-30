@@ -75,6 +75,9 @@ func (p *scanProgressTracker) update(m scanProgressMsg) {
 			text += fmt.Sprintf("/%d", m.target)
 		}
 		text += fmt.Sprintf(" · 跳过 %d", m.skipped)
+		if m.budgetReached {
+			text += "（已到时间预算）"
+		}
 		if m.detail != "" {
 			text += "\n" + m.detail
 		}
@@ -107,6 +110,9 @@ func (p *scanProgressTracker) ready(available int, cached bool) {
 		text = fmt.Sprintf("缓存就绪 · 可用 %d", available)
 	} else {
 		text += fmt.Sprintf(" · 已验证 %d/%d · 跳过 %d", p.last.completed, p.last.total, p.last.skipped)
+		if p.last.budgetReached {
+			text += "（预算内结果）"
+		}
 	}
 	p.publish(1, p.label+text)
 }

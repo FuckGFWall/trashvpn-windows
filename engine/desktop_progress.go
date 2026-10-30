@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 var desktopEvents bool
@@ -35,13 +36,16 @@ func applyScanIntensity(o *options, level string) {
 	case "low":
 		o.perSubnet, o.earlyStop = 1, 2
 		o.portSamples = 4
+		o.scanBudget, o.candidateBudget = 25*time.Second, 10*time.Second
 	case "high":
 		o.perSubnet, o.earlyStop = 8, 8
 		o.portSamples = 12
+		o.scanBudget, o.candidateBudget = 75*time.Second, 15*time.Second
 	default:
 		level = "medium"
 		o.perSubnet, o.earlyStop = 3, 4
 		o.portSamples = 8
+		o.scanBudget, o.candidateBudget = 45*time.Second, 12*time.Second
 	}
 	o.scanIntensity = level
 }

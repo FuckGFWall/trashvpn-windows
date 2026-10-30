@@ -50,9 +50,70 @@ func TestScanStrengthControlsBothPhases(t *testing.T) {
 		if scanPortSamples(o) != []int{4, 8, 12}[i] || o.earlyStop != []int{2, 4, 8}[i] {
 			t.Fatalf("wrong %s budgets: %+v", level, o)
 		}
+		if o.scanBudget != []time.Duration{25 * time.Second, 45 * time.Second, 75 * time.Second}[i] || o.candidateBudget <= 0 {
+			t.Fatalf("unbounded %s scan: %+v", level, o)
+		}
 	}
 	if scanPortSamples(options{}) != portProbeSample {
 		t.Fatal("CLI default changed")
+	}
+}
+
+func TestCandidateBudgetMovesOnInsteadOfSweepingPortsForever(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var final scanProgressMsg
+	results, err := verifyTargets(ctx, options{tunnelParallel: 1, earlyStop: 1, candidateBudget: 20 * time.Millisecond}, mustParseProto(protoAWG), fixtureTargets(5),
+		func(m tea.Msg) {
+			if s, ok := m.(scanProgressMsg); ok && s.finished {
+				final = s
+			}
+		},
+		func() (tunnel, error) { return &fakeScanTunnel{}, nil },
+		func(ctx context.Context, _ tunnel, target probeTarget) endpointResult {
+			if target.port == 0 {
+				<-ctx.Done()
+				return endpointResult{ok: true, durable: true}
+			}
+			return endpointResult{ok: true, durable: true, endpoint: "fixture"}
+		})
+	if err != nil || ctx.Err() != nil || len(workingSorted(results)) != 1 || final.completed != 2 || final.succeeded != 1 || final.skipped != 3 {
+		t.Fatalf("candidate timeout accepted a stale result or failed to continue: %+v %v", final, err)
+	}
+}
+
+func TestScanTimeBudgetRetainsVerifiedResults(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprint(partial), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var final scanProgressMsg
+			start := time.Now()
+			results, err := verifyTargets(ctx, options{tunnelParallel: 4, earlyStop: 8, scanBudget: 30 * time.Millisecond}, mustParseProto(protoWG), fixtureTargets(40),
+				func(m tea.Msg) {
+					if s, ok := m.(scanProgressMsg); ok && s.finished {
+						final = s
+					}
+				},
+				func() (tunnel, error) { return &fakeScanTunnel{}, nil },
+				func(ctx context.Context, _ tunnel, target probeTarget) endpointResult {
+					if partial && target.port == 0 {
+						return endpointResult{ok: true, durable: true, endpoint: "fixture"}
+					}
+					<-ctx.Done()
+					return endpointResult{}
+				})
+			if ctx.Err() != nil || time.Since(start) > 500*time.Millisecond || !final.budgetReached {
+				t.Fatalf("budget did not stop independently: %+v %v", final, err)
+			}
+			if partial {
+				if err != nil || len(workingSorted(results)) != 1 {
+					t.Fatalf("partial results discarded: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "时间预算") {
+				t.Fatalf("missing useful timeout error: %v", err)
+			}
+		})
 	}
 }
 
@@ -333,5 +394,49 @@ func TestMasqueH2AndH3HeaderWaitsObserveCancel(t *testing.T) {
 				t.Fatal("CONNECT header wait ignored cancellation")
 			}
 		})
+	}
+}
+
+func TestMasqueH3DefaultProbeAllowsSlowConnectResponse(t *testing.T) {
+	_, certPEM, keyPEM, err := probePEMCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := quic.ListenAddr("127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, NextProtos: []string{http3.NextProtoH3}}, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &http3.Server{EnableDatagrams: true, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timer := time.NewTimer(2100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-r.Context().Done():
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})}
+	done := make(chan struct{})
+	go func() { defer close(done); _ = s.ServeListener(l) }()
+	defer func() { _ = s.Close(); _ = l.Close(); <-done }()
+	dev, stack, err := newIPStack([]netip.Addr{netip.MustParseAddr("192.0.2.2")}, 1280)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn := &masqueTunnel{dev: dev, ipStack: stack, tlsCfg: &tls.Config{InsecureSkipVerify: true, NextProtos: []string{http3.NextProtoH3}}}
+	defer tn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !tn.handshake(ctx, l.Addr().String(), 2*time.Second) {
+		t.Fatal("healthy H3 CONNECT was cut off by WG's 2s timeout")
+	}
+	if !tn.samePeer(l.Addr().String()) {
+		t.Fatal("successful tunnel lost immediately after handshake")
 	}
 }

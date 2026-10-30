@@ -578,7 +578,9 @@ func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout t
 	// Fast-fail: a per-attempt ceiling in the 3-5s band. The old behaviour
 	// inherited whatever the caller passed, which for a chained scan is the
 	// whole scan budget — one dark endpoint could eat it.
-	if t.h2 && timeout < masqueFastFail {
+	// H3 needs the same floor as H2: a 2s WG probe timeout must not abort
+	// a healthy QUIC + CONNECT-IP exchange before its response arrives.
+	if timeout < masqueFastFail {
 		timeout = masqueFastFail
 	}
 	if timeout > masqueFastFail {

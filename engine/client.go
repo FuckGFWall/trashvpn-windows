@@ -274,6 +274,9 @@ func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRu
 						usable++
 					}
 				}
+				if usable == 0 {
+					goto freshScan
+				}
 				desktopScanReady(usable, true)
 				if opts.through != "" {
 					stageMsg(fmt.Sprintf("[%s] 使用缓存端点（%d 个，扫描于 %s）",
@@ -289,6 +292,7 @@ func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRu
 		}
 	}
 
+freshScan:
 	if opts.scanned != nil {
 		*opts.scanned = true
 	}
@@ -301,6 +305,9 @@ func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRu
 		return nil, run, err
 	}
 	stageMsg(fmt.Sprintf("[%s] 端点扫描完成（%d 个结果）", protoLabel(opts.proto), len(results)))
+	if len(results) == 0 {
+		return results, run, nil
+	} // Do not overwrite a usable cache with a failed scan.
 	// The cache's Proto records the user-facing protocol the scan ran under
 	// ("wwarp" for chains) so a later read can tell the two apart.
 	desktopScanNote("cache-write", "保存节点缓存")

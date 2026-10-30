@@ -10,17 +10,19 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
 type options struct {
-	scanned       *bool
-	desktop       bool
-	prepareOnly   bool
-	optimistic    bool
-	scanIntensity string
-	portSamples   int
+	scanned                     *bool
+	desktop                     bool
+	prepareOnly                 bool
+	optimistic                  bool
+	scanIntensity               string
+	portSamples                 int
+	scanBudget, candidateBudget time.Duration
 
 	tunnelParallel int
 	timeoutSec     int
