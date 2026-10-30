@@ -48,6 +48,8 @@ internal static class Program
         var outDir = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/previews");
         Directory.CreateDirectory(outDir);
         var app = new App { LaunchWindowOnStartup = false }; app.InitializeComponent();
+        using (var logo = Application.GetResourceStream(new Uri("pack://application:,,,/Xehn.App;component/Assets/logo.ico")).Stream)
+            Check(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(logo)).Equals("2c8a810abb2d6d13224c690e99111ac3296aec39514f6180729675768a21aac7", StringComparison.OrdinalIgnoreCase), "embedded ICO exactly matches upstream download");
         WorkflowChecks.Run(Check, outDir);
         var window = new MainWindow();
         var root = (FrameworkElement)window.Content;
@@ -67,6 +69,8 @@ internal static class Program
         Check(window.FindName("PageCaption") == null && !Find<TextBlock>(root).Any(t => t.Text == "WARP, SIMPLIFIED."), "decorative subtitles removed");
         Check(((RadioButton)window.FindName("HomeNav")).ActualHeight >= 56, "larger sidebar selection target");
         Check(Find<ProgressBar>(root).Count() == 2, "home shows registration and scan progress bars");
+        Check(ReferenceEquals(window.Icon, Branding.Image) && ReferenceEquals(((Image)window.FindName("BrandIcon")).Source, Branding.Image), "window and sidebar render original upstream icon");
+        Check(((FrameworkElement)window.FindName("ModeSelectors")).GetBindingExpression(UIElement.IsEnabledProperty)?.ParentBinding.Path.Path == "CanChangeModes", "mode selector binding permits connected hot switching");
         Snapshot("home-light");
         foreach (var page in new[] { "Settings", "About", "Logs", "Home" })
         {
@@ -77,6 +81,7 @@ internal static class Program
             if (page == "Settings")
             {
                 var panel = (FrameworkElement)window.FindName("SettingsPage");
+                Check(((CheckBox)window.FindName("CloseToTraySetting")).IsChecked == true && window.FindName("AutoStartSetting") is CheckBox, "settings expose default-on tray closing and autostart");
                 Check(Find<ComboBox>(panel).All(c => c.ActualHeight == 32 && c.ActualWidth == 160), "compact dropdown dimensions");
                 Check(Find<TextBox>(panel).All(t => t.ActualHeight == 32), "compact input height");
                 App.ApplyTheme("dark"); Snapshot("settings-dark");

@@ -17,6 +17,8 @@ public sealed class ClientSettings
     public int TimeoutSec { get; set; } = 2;
     public bool AllowLan { get; set; }
     public bool AutoConnect { get; set; }
+    public bool CloseToTray { get; set; } = true;
+    public bool AutoStart { get; set; }
     public bool AutoRepair { get; set; } = true;
     public bool Rescan { get; set; }
     public bool VerifyBeforeConnect { get; set; }

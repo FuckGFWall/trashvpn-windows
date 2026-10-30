@@ -30,6 +30,10 @@ Check(readyLines.Any(l => l.Contains("初检通过")), "bundled GeoIP / GeoSite 
 Check(!(await engine.ReadSessionAsync()).Connected, "missing state is disconnected");
 await File.WriteAllTextAsync(Path.Combine(testHome, "state.json"), "{\"connected\":true,\"core_pid\":0}");
 Check(!(await engine.ReadSessionAsync()).Connected, "stale state cannot fake a live core");
+var modeRejected = false;
+try { await engine.RunAsync("desktop-modes", lines.Enqueue, System.Text.Json.JsonSerializer.Serialize(new ClientSettings(), ClientSettings.JsonOptions)).WaitAsync(TimeSpan.FromSeconds(15)); }
+catch (IOException) { modeRejected = true; }
+Check(modeRejected && lines.Any(l => l.Contains("没有可热切换的本地连接")) && !File.Exists(Path.Combine(testHome, "core", "config.yaml")), "hot reload rejects stale session before API / proxy mutation");
 
 // A loopback fixture, not a proxy or tunnel; verifies the mihomo traffic stream contract.
 var listener = new TcpListener(IPAddress.Loopback, 0);

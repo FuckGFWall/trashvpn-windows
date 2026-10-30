@@ -27,3 +27,5 @@ func KillByPID(pid int, expectExe string) error {
 // KillStaleCores is Windows-only; elsewhere the core is tied to the client's
 // own lifetime by the shell, so there is nothing to reap.
 func KillStaleCores(exe string) int { return 0 }
+
+func ProcessMatches(pid int, expectExe string) bool { return false }

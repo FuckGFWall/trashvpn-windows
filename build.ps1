@@ -7,6 +7,9 @@ if (-not $GoExecutable) {
 }
 $dotnet = if (Get-Command dotnet -ErrorAction SilentlyContinue) { 'dotnet' } else { Join-Path $env:ProgramFiles 'dotnet\dotnet.exe' }
 $output = Join-Path $root 'artifacts\app'
+# Do not replace binaries that belong to a running client (including its core).
+$running = Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($output + '\', [StringComparison]::OrdinalIgnoreCase) }
+if ($running) { throw '构建目录中的客户端或内核仍在运行。请先自行退出客户端，再运行 build.ps1；不会自动停止进程。' }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:GOCACHE = Join-Path $root '.cache\go-build'
 $env:GOMODCACHE = Join-Path $root '.cache\go-mod'

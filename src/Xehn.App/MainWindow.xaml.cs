@@ -11,6 +11,8 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel model;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(2) };
+    private TrayService? tray;
+    private bool allowClose, exitInProgress, loaded;
     public MainWindow()
     {
         InitializeComponent();
@@ -18,13 +20,17 @@ public partial class MainWindow : Window
         timer.Tick += async (_, _) => await model.RefreshAsync();
         Loaded += async (_, _) =>
         {
+            if (loaded) return;
+            loaded = true;
+            try { tray = new TrayService(model, ShowMainWindow, RequestExitAsync); }
+            catch (Exception ex) { model.Notice = "托盘初始化失败，关闭窗口将退出：" + ex.Message; }
             await model.RefreshAsync(); timer.Start();
             model.InitializePreparation();
-            if (model.AutoConnect && !model.IsConnected) await model.ToggleAsync();
+            if ((((App)Application.Current).RestartConnection ?? model.AutoConnect) && !model.IsConnected) await model.ToggleAsync();
         };
         SystemEvents.UserPreferenceChanged += SystemThemeChanged;
         Closing += OnClosing;
-        Closed += (_, _) => { timer.Stop(); SystemEvents.UserPreferenceChanged -= SystemThemeChanged; model.Dispose(); };
+        Closed += (_, _) => { timer.Stop(); tray?.Dispose(); SystemEvents.UserPreferenceChanged -= SystemThemeChanged; model.Dispose(); };
     }
     private void SystemThemeChanged(object sender, UserPreferenceChangedEventArgs e) => Dispatcher.InvokeAsync(() => { if (model.Theme == "auto") App.ApplyTheme("auto"); });
     private void Navigate(object sender, RoutedEventArgs e)
@@ -57,22 +63,33 @@ public partial class MainWindow : Window
         try { Clipboard.SetText(model.Logs.Length > 0 ? model.Logs : "暂无运行日志"); }
         catch (Exception ex) { model.Notice = ex.Message; }
     }
-    private bool closingPreparation;
+    public void ShowMainWindow()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+    public static bool ShouldHideOnClose(bool closeToTray, bool trayAvailable, bool explicitExit) => closeToTray && trayAvailable && !explicitExit;
+    public async Task RequestExitAsync()
+    {
+        if (exitInProgress) return;
+        exitInProgress = true;
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            if (!await model.ShutdownAsync()) { ShowMainWindow(); return; }
+            allowClose = true;
+            Close(); Application.Current.Shutdown();
+        }
+        finally { exitInProgress = false; }
+    }
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (model.IsPreparing && !model.ConnectionRequested)
-        {
-            e.Cancel = true;
-            if (closingPreparation) return;
-            closingPreparation = true;
-            await model.StopPreparationAsync();
-            closingPreparation = false; Close(); return;
-        }
-        // Do not kill an in-flight engine or leave a system proxy pointing at a dead core.
-        if (model.IsBusy || model.IsConnected)
-        {
-            e.Cancel = true;
-            model.Notice = model.IsBusy ? "请先取消当前操作，等待清理完成后再关闭。" : "请先点击电源断开连接，再关闭客户端。";
-        }
+        if (allowClose || !loaded) return;
+        // Shutdown after an elevation handoff must not be converted into Hide.
+        if (((App)Application.Current).IsRestarting) return;
+        e.Cancel = true;
+        if (ShouldHideOnClose(model.CloseToTray, tray != null, exitInProgress)) { Hide(); return; }
+        await RequestExitAsync();
     }
 }

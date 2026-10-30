@@ -8,10 +8,17 @@ public partial class App : Application
 {
     private Mutex? instance;
     public bool LaunchWindowOnStartup { get; set; } = true;
-    protected override void OnStartup(StartupEventArgs e)
+    public bool? RestartConnection { get; private set; }
+    public bool IsRestarting { get; set; }
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         if (!LaunchWindowOnStartup) return;
+        if (e.Args.Length > 0)
+        {
+            if (!await DesktopIntegration.WaitForRestartAsync(e.Args)) { Shutdown(); return; }
+            RestartConnection = e.Args[3] == "1";
+        }
         instance = new Mutex(true, @"Local\Xehn.Fluent.Desktop", out var first);
         if (!first) { Shutdown(); return; }
         var window = new MainWindow();

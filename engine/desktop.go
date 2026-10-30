@@ -23,9 +23,8 @@ func runDesktopConnect(parent context.Context, opts options) error {
 func runDesktopPrepare(parent context.Context, opts options) error {
 	return runDesktopOperation(parent, true)
 }
-func runDesktopOperation(parent context.Context, prepare bool) error {
+func desktopContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
 	go func() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
@@ -36,6 +35,11 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 		}
 		cancel()
 	}()
+	return ctx, cancel
+}
+func runDesktopOperation(parent context.Context, prepare bool) error {
+	ctx, cancel := desktopContext(parent)
+	defer cancel()
 	s := loadSettings()
 	if raw := os.Getenv("WARP_DESKTOP_SETTINGS"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &s); err != nil {
@@ -113,7 +117,9 @@ func runGeoCheck(context.Context, options) error {
 	fmt.Println("GeoIP / GeoSite 本地文件完整性初检通过（大小检查，非版本或内容校验）")
 	return nil
 }
-func runGeoRepair(ctx context.Context, _ options) error {
+func runGeoRepair(parent context.Context, _ options) error {
+	ctx, cancel := desktopContext(parent)
+	defer cancel()
 	dir, err := coreDir()
 	if err != nil {
 		return err

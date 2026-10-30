@@ -1417,6 +1417,7 @@ func runDisconnectCmd(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
+	var cleanupErr error
 	if state.CorePID > 0 {
 		// The core was started by an earlier connect (CLI: a different process,
 		// GUI: a different Core instance), so only the recorded pid can reach
@@ -1424,9 +1425,11 @@ func runDisconnectCmd(ctx context.Context, opts options) error {
 		// never take an unrelated process down with it.
 		if err := core.KillByPID(state.CorePID, bin); err != nil {
 			fmt.Fprintln(os.Stderr, errPal.warn(err.Error()))
+			return err // preserve session and proxy so cleanup can be retried
 		}
 	} else if err := c.Stop(); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.warn("stop core: "+err.Error()))
+		return err
 	}
 	// Stop the external Psiphon process before restoring the host proxy, so no
 	// traffic is left pointing at a dead localhost SOCKS listener.
@@ -1453,6 +1456,7 @@ func runDisconnectCmd(ctx context.Context, opts options) error {
 			if err != nil {
 				fmt.Fprintln(os.Stderr, errPal.warn("restore system proxy: "+err.Error()))
 				fmt.Fprintln(os.Stderr, errPal.warn("请手动关闭系统代理，或以管理员身份运行本程序后断开"))
+				cleanupErr = err
 			}
 		}
 	}
@@ -1470,7 +1474,12 @@ func runDisconnectCmd(ctx context.Context, opts options) error {
 	state.OpenVPNMode = false
 	state.OpenVPNRegion = ""
 	state.OpenVPNNode = nil
-	_ = saveState(state)
+	if err := saveState(state); err != nil {
+		cleanupErr = errors.Join(cleanupErr, err)
+	}
+	if cleanupErr != nil {
+		return cleanupErr
+	}
 	fmt.Fprintln(os.Stderr, errPal.ok("disconnected"))
 	return nil
 }

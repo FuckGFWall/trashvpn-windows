@@ -74,8 +74,130 @@ internal static class WorkflowChecks
             check(fake.MaxConcurrent == 1, "rapid protocol switches serialize engine ownership");
             var stop = vm.StopPreparationAsync(); PumpUntil(() => stop.IsCompleted);
             check(!vm.IsPreparing, "closing cancels background preparation cleanly");
+            DesktopChecks(check, output);
         }
         finally { SynchronizationContext.SetSynchronizationContext(previous); }
+    }
+
+    private static void DesktopChecks(Action<bool, string> check, string output)
+    {
+        FakeEngine NewEngine() => new(Path.Combine(output, "desktop", Guid.NewGuid().ToString("N")));
+        var fake = NewEngine(); var desktop = new FakeDesktop();
+        using var vm = new MainViewModel(fake, desktop);
+        check(vm.CloseToTray && !vm.AutoStart, "tray-on-close defaults on; autostart defaults off");
+        check(MainWindow.ShouldHideOnClose(true, true, false) && !MainWindow.ShouldHideOnClose(false, true, false) &&
+            !MainWindow.ShouldHideOnClose(true, false, false) && !MainWindow.ShouldHideOnClose(true, true, true), "close policy never hides on explicit exit or missing tray");
+        var shown = 0; var exits = 0;
+        using var tray = new TrayService(vm, () => shown++, () => { exits++; return Task.CompletedTask; }, visible: false);
+        check(tray.ContextMenu.Items.Cast<System.Windows.Forms.ToolStripItem>().Select(i => i.Text).SequenceEqual(new[] { "退出", "连接 VPN", "显示主界面" }), "real tray menu has exactly the requested three actions");
+        tray.ContextMenu.Items[2].PerformClick(); tray.ContextMenu.Items[0].PerformClick();
+        check(shown == 1 && exits == 1, "tray show / exit actions dispatch to lifecycle handlers");
+        vm.AutoStart = true;
+        check(desktop.AutoStartEnabled && ClientSettings.Load(fake.Home).AutoStart, "autostart opt-in persists through isolated integration");
+        vm.AutoStart = false;
+        check(!desktop.AutoStartEnabled && !ClientSettings.Load(fake.Home).AutoStart, "autostart opt-out persists");
+        desktop.FailAutoStart = true; vm.AutoStart = true;
+        check(!vm.AutoStart && vm.Notice.Contains("自启动设置失败"), "autostart failure retains prior preference");
+        check(DesktopIntegration.AutoStartCommand(@"D:\app path\Xehn.App.exe") == "\"D:\\app path\\Xehn.App.exe\"", "autostart quotes executable paths containing spaces");
+        fake.Connected = true; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.CanChangeModes && !vm.CanConfigure && tray.ContextMenu.Items[1].Text == "关闭 VPN", "connected mode selectors enabled; tray reflects live session");
+        vm.SplitSelected = true;
+        check(fake.Last.Command == "desktop-modes" && fake.Last.Route == "bypass" && !vm.CanChangeModes && !tray.ContextMenu.Items[1].Enabled, "routing hot switch uses one serialized engine reload and disables tray toggle");
+        vm.TunSelected = true;
+        check(fake.Calls.Count == 1, "overlapping mode request cannot start a second operation");
+        fake.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.SplitSelected && vm.IsConnected && ClientSettings.Load(fake.Home).ProxyMode == "bypass", "successful hot switch commits selection without disconnecting");
+        vm.GlobalSelected = true; fake.Fail(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.SplitSelected && vm.IsConnected && ClientSettings.Load(fake.Home).ProxyMode == "bypass" && vm.Notice.Contains("失败"), "failed reload restores radio selection and leaves old preference");
+        vm.TunSelected = true;
+        check(fake.Last.Capture == "tun", "elevated proxy-to-TUN hot switch uses current connection");
+        fake.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        vm.ProxySelected = true; fake.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.ProxySelected && vm.IsConnected && desktop.RestartCount == 0, "TUN-to-proxy hot switch needs no restart");
+        desktop.IsElevated = false; desktop.AcceptRestart = false;
+        var count = fake.Calls.Count;
+        vm.TunSelected = true; PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.ProxySelected && vm.IsConnected && fake.Calls.Count == count && desktop.RestartReconnect && desktop.PrepareCount == 0, "UAC cancellation preserves connected proxy and settings");
+        desktop.AcceptRestart = true;
+        vm.TunSelected = true;
+        check(fake.Last.Command == "disconnect" && vm.ProxySelected, "accepted elevation cleans old connection before committing TUN");
+        fake.Connected = false; fake.Complete(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
+        check(vm.TunSelected && !vm.IsConnected && ClientSettings.Load(fake.Home).CaptureMode == "tun" && desktop.RestartReconnect, "elevation handoff persists target and reconnect intent after cleanup");
+        check(fake.MaxConcurrent == 1, "mode / elevation operations keep single engine ownership");
+
+        var idle = NewEngine(); var idleDesktop = new FakeDesktop { IsElevated = false };
+        using var idleVm = new MainViewModel(idle, idleDesktop);
+        idleVm.TunSelected = true; PumpUntil(() => idleVm.ModeChangeTask.IsCompleted);
+        check(idleVm.TunSelected && !idleDesktop.RestartReconnect && idle.Calls.Count == 0, "disconnected TUN elevation preserves disconnected intent");
+
+        var running = NewEngine(); running.Connected = true;
+        using var runningVm = new MainViewModel(running, new FakeDesktop());
+        runningVm.RefreshAsync().GetAwaiter().GetResult();
+        var shutdown = runningVm.ShutdownAsync();
+        check(running.Last.Command == "disconnect" && !runningVm.CanToggleFromTray, "explicit exit disconnects active VPN instead of hiding");
+        running.Connected = false; running.Complete(); PumpUntil(() => shutdown.IsCompleted);
+        check(shutdown.Result && !runningVm.IsConnected, "exit waits for disconnect and state cleanup");
+
+        var pending = NewEngine(); using var pendingVm = new MainViewModel(pending, new FakeDesktop());
+        pendingVm.InitializePreparation(); var connection = pendingVm.ToggleAsync();
+        check(!pendingVm.CanToggleFromTray && pendingVm.TrayConnectionLabel.Contains("正在连接"), "tray connection action is greyed while connecting / queued");
+        var cancelExit = pendingVm.ShutdownAsync(); PumpUntil(() => cancelExit.IsCompleted && connection.IsCompleted);
+        check(cancelExit.Result && pending.Calls.All(c => c.Command != "desktop-connect"), "exit cancels queued preparation without starting VPN");
+
+        var failing = NewEngine(); failing.Connected = true;
+        new ClientSettings().Save(failing.Home);
+        using var failingVm = new MainViewModel(failing, new FakeDesktop()); failingVm.RefreshAsync().GetAwaiter().GetResult();
+        Directory.CreateDirectory(Path.Combine(failing.Home, "settings.json.tmp"));
+        failingVm.SplitSelected = true; failing.Complete();
+        PumpUntil(() => failing.Calls.Count == 2);
+        check(failing.Last.Route == "global", "settings write failure rolls running engine back to previous routing");
+        failing.Complete(); PumpUntil(() => failingVm.ModeChangeTask.IsCompleted);
+        check(failingVm.GlobalSelected && ClientSettings.Load(failing.Home).ProxyMode == "global", "write-failure rollback keeps UI and persisted mode consistent");
+
+        var cleanup = NewEngine(); cleanup.Connected = true;
+        using var cleanupVm = new MainViewModel(cleanup, new FakeDesktop()); cleanupVm.RefreshAsync().GetAwaiter().GetResult();
+        var failedExit = cleanupVm.ShutdownAsync(); cleanup.Fail(); PumpUntil(() => failedExit.IsCompleted);
+        check(!failedExit.Result && cleanupVm.Notice.Contains("退出清理失败"), "cleanup failure keeps application open for retry");
+        var retriedExit = cleanupVm.ShutdownAsync();
+        check(cleanup.Last.Command == "disconnect", "failed exit retries cleanup instead of starting a new connection");
+        cleanup.Connected = false; cleanup.Complete(); PumpUntil(() => retriedExit.IsCompleted);
+        check(retriedExit.Result, "successful cleanup retry permits exit");
+
+        var switching = NewEngine(); switching.Connected = true;
+        using var switchingVm = new MainViewModel(switching, new FakeDesktop()); switchingVm.RefreshAsync().GetAwaiter().GetResult();
+        switchingVm.SplitSelected = true;
+        var switchExit = switchingVm.ShutdownAsync(); PumpUntil(() => switching.Last.Command == "disconnect");
+        switching.Connected = false; switching.Complete(); PumpUntil(() => switchExit.IsCompleted);
+        check(switchExit.Result && switchingVm.GlobalSelected && switching.MaxConcurrent == 1, "exit during hot reload waits for cancellation / rollback before disconnecting");
+
+        var unpolled = NewEngine(); unpolled.Connected = true;
+        using var unpolledVm = new MainViewModel(unpolled, new FakeDesktop());
+        var unpolledExit = unpolledVm.ShutdownAsync();
+        check(unpolled.Last.Command == "disconnect", "exit re-reads disk session even before first UI poll");
+        unpolled.Connected = false; unpolled.Complete(); PumpUntil(() => unpolledExit.IsCompleted);
+        check(unpolledExit.Result, "unpolled session is cleaned before exit");
+
+        var geo = NewEngine(); using var geoVm = new MainViewModel(geo, new FakeDesktop());
+        var download = geoVm.GeoAsync(true); var geoExit = geoVm.ShutdownAsync();
+        PumpUntil(() => geoExit.IsCompleted && download.IsCompleted);
+        check(geoExit.Result && geo.CancelCount == 1, "exit cancels and awaits an in-flight database download");
+
+        var inFlight = NewEngine(); using var flightVm = new MainViewModel(inFlight, new FakeDesktop());
+        flightVm.InitializePreparation(); inFlight.Complete(); PumpUntil(() => !flightVm.IsPreparing);
+        var flight = flightVm.ToggleAsync(); PumpUntil(() => inFlight.Last.Command == "desktop-connect");
+        var flightExit = flightVm.ShutdownAsync(); PumpUntil(() => flightExit.IsCompleted && flight.IsCompleted);
+        check(flightExit.Result && inFlight.CancelCount == 1 && !flightVm.IsConnected, "exit cancels and awaits an engine connection in progress");
+    }
+
+    private sealed class FakeDesktop : IDesktopIntegration
+    {
+        public bool IsElevated { get; set; } = true;
+        public bool AutoStartEnabled { get; private set; }
+        public bool AcceptRestart = true, RestartReconnect, FailAutoStart;
+        public int RestartCount, PrepareCount;
+        public void SetAutoStart(bool enabled) { if (FailAutoStart) throw new IOException("fixture startup failure"); AutoStartEnabled = enabled; }
+        public async Task<bool> RestartElevatedAsync(bool reconnect, Func<Task<bool>> prepare)
+        { RestartCount++; RestartReconnect = reconnect; if (!AcceptRestart) return false; PrepareCount++; return await prepare(); }
     }
 
     private static void PumpUntil(Func<bool> ready)
@@ -122,6 +244,8 @@ internal static class WorkflowChecks
         public string Command => command;
         public bool Prepared => prepared;
         public string Protocol => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.Proto;
+        public string Capture => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.CaptureMode;
+        public string Route => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.ProxyMode;
         public bool VerifyBeforeConnect => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.VerifyBeforeConnect;
         public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Emit(string type, string phase = "", string state = "", int done = 0, int total = 0, string text = "test") => log("@@XEHN " + JsonSerializer.Serialize(new { type, phase, state, done, total, text }));

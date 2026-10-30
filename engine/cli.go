@@ -23,6 +23,7 @@ type command struct {
 var commands = []command{
 	{name: "desktop-prepare", setup: func(*flag.FlagSet, *options) {}, run: runDesktopPrepare},
 	{name: "desktop-connect", setup: func(*flag.FlagSet, *options) {}, run: runDesktopConnect},
+	{name: "desktop-modes", setup: func(*flag.FlagSet, *options) {}, run: runDesktopModes},
 	{name: "geo-check", setup: func(*flag.FlagSet, *options) {}, run: runGeoCheck},
 	{name: "geo-repair", setup: func(*flag.FlagSet, *options) {}, run: runGeoRepair},
 	{

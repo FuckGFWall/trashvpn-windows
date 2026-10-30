@@ -191,3 +191,25 @@ func KillByPID(pid int, expectExe string) error {
 	}
 	return nil
 }
+
+// ProcessMatches is read-only and fails closed if identity cannot be checked.
+func ProcessMatches(pid int, expectExe string) bool {
+	if pid <= 0 {
+		return false
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	if event, err := windows.WaitForSingleObject(h, 0); err != nil || event != uint32(windows.WAIT_TIMEOUT) {
+		return false
+	}
+	var buf [32768]uint16
+	size := uint32(len(buf))
+	if windows.QueryFullProcessImageName(h, 0, &buf[0], &size) != nil {
+		return false
+	}
+	want, err := filepath.Abs(expectExe)
+	return err == nil && strings.EqualFold(windows.UTF16ToString(buf[:size]), want)
+}
