@@ -8,12 +8,13 @@ namespace Xehn.App;
 public static class Branding
 {
     // The upstream ICO stores every size as PNG. WPF's ICO decoder rejects
-    // some such containers; decode its original 256px PNG without redrawing or
-    // converting the artwork. The executable and tray still use the exact ICO.
+    // some such containers; decode the 256px PNG directly. All entry points
+    // share the same subtly rounded alpha mask derived from the original ICO.
+    public const string IconResource = "pack://application:,,,/Xehn.App;component/Assets/logo-rounded.ico";
     public static ImageSource Image { get; } = Load();
     private static ImageSource Load()
     {
-        using var source = Application.GetResourceStream(new Uri("pack://application:,,,/Xehn.App;component/Assets/logo.ico")).Stream;
+        using var source = Application.GetResourceStream(new Uri(IconResource)).Stream;
         using var reader = new BinaryReader(source);
         if (reader.ReadUInt16() != 0 || reader.ReadUInt16() != 1) throw new InvalidDataException("无效的品牌 ICO。");
         var count = reader.ReadUInt16();

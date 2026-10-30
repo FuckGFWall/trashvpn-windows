@@ -21,7 +21,7 @@ public sealed class TrayService : IDisposable
     public TrayService(MainViewModel model, Action show, Func<Task> exit, bool visible = true)
     {
         this.model = model;
-        using var stream = Application.GetResourceStream(new Uri("pack://application:,,,/Xehn.App;component/Assets/logo.ico")).Stream;
+        using var stream = Application.GetResourceStream(new Uri(Branding.IconResource)).Stream;
         artwork = new Icon(stream, new System.Drawing.Size(32, 32));
         menu.Style = (Style)Application.Current.FindResource("TrayContextMenu");
         menu.ItemContainerStyle = (Style)Application.Current.FindResource("TrayMenuItem");

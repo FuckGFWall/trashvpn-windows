@@ -51,6 +51,7 @@ internal static class Program
         SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext(app.Dispatcher));
         using (var logo = Application.GetResourceStream(new Uri("pack://application:,,,/Xehn.App;component/Assets/logo.ico")).Stream)
             Check(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(logo)).Equals("2c8a810abb2d6d13224c690e99111ac3296aec39514f6180729675768a21aac7", StringComparison.OrdinalIgnoreCase), "embedded ICO exactly matches upstream download");
+        IconChecks.Run(Check, outDir);
         WorkflowChecks.Run(Check, outDir);
         DashboardChecks.Run(Check);
         var window = new MainWindow();
@@ -73,14 +74,21 @@ internal static class Program
         Check(vm.Upload == "" && vm.Download == "", "initial UI has no fake traffic");
         Check(((FrameworkElement)window.FindName("PageHeader")).Visibility == Visibility.Collapsed, "home header removed");
         Check(window.FindName("PageCaption") == null && !Find<TextBlock>(root).Any(t => t.Text == "WARP, SIMPLIFIED."), "decorative subtitles removed");
-        Check(window.Width == 980 && window.Height == 760 && ((Grid)root).ColumnDefinitions[0].ActualWidth == 156, "smaller window and narrower sidebar");
+        Check(window.Width == 980 && window.Height == 760 && ((Grid)root).ColumnDefinitions[0].ActualWidth == 144, "smaller window and further narrowed sidebar");
         Check(((TextBlock)window.FindName("PageTitle")).FontSize == 30, "Settings / About / Logs page heading keeps its original font size");
-        Check(((RadioButton)window.FindName("HomeNav")).ActualHeight == 44 && ((RadioButton)window.FindName("HomeNav")).ActualWidth is >= 130 and <= 132, "compact sidebar selection background");
+        Check(((RadioButton)window.FindName("HomeNav")).ActualHeight == 44 && ((RadioButton)window.FindName("HomeNav")).ActualWidth is >= 118 and <= 120, "compact sidebar selection background");
+        var brand = (FrameworkElement)window.FindName("BrandGroup"); var rail = (Border)window.FindName("Sidebar");
+        Check(Math.Abs(brand.TranslatePoint(new Point(brand.ActualWidth / 2, 0), rail).X - (rail.ActualWidth - 1) / 2) < 1, "brand icon and software name are centered together in the narrowed rail");
+        var navs = Find<RadioButton>(root).Where(b => b.GroupName == "Navigation").ToArray();
+        Check(navs.All(n => n.FocusVisualStyle == null && n.Focusable), "sidebar removes dashed focus adorners without disabling keyboard focus");
+        var connectionStatus = (StackPanel)window.FindName("ConnectionStatus");
+        Check(connectionStatus.Children.Count == 2 && connectionStatus.Children[0] is TextBlock { FontSize: 12 } && connectionStatus.Children[1] is ProgressRing && !Find<TextBlock>(rail).Any(t => t.Text.Contains("1.0.0")), "sidebar footer has only larger status text and its spinner, no version or dot");
         Check(Find<TextBlock>((RadioButton)window.FindName("HomeNav")).Select(t => t.FontSize).SequenceEqual(new[] { 20d, 16d }), "sidebar navigation icon and label fonts are smaller");
         Check(Find<ProgressBar>((FrameworkElement)window.FindName("HomePage")).Count() == 2, "home shows registration and scan progress bars");
         Check(ReferenceEquals(window.Icon, Branding.Image) && ReferenceEquals(((Image)window.FindName("BrandIcon")).Source, Branding.Image), "window and sidebar render original upstream icon");
         Check(((FrameworkElement)window.FindName("ModeSelectors")).GetBindingExpression(UIElement.IsEnabledProperty)?.ParentBinding.Path.Path == "CanChangeModes", "mode selector binding permits connected hot switching");
         var home = (FrameworkElement)window.FindName("HomePage"); var viewport = (FrameworkElement)window.FindName("PageContent");
+        Check(Find<FrameworkElement>(home).All(e => e.ToolTip == null), "home controls have no hover reminders, including split routing and power");
         bool HasScrollAncestor(DependencyObject node) { for (var p = VisualTreeHelper.GetParent(node); p != null; p = VisualTreeHelper.GetParent(p)) if (p is ScrollViewer) return true; return false; }
         Check(!HasScrollAncestor(home) && ((ScrollViewer)window.FindName("PageScroller")).Visibility == Visibility.Collapsed, "home is outside the scrolling region, not just hiding its scrollbar");
         Check(home.DesiredSize.Height <= viewport.ActualHeight, "all home cards fit the compact default window without clipping");
@@ -102,9 +110,19 @@ internal static class Program
             {
                 var panel = (FrameworkElement)window.FindName("SettingsPage");
                 Check(((CheckBox)window.FindName("CloseToTraySetting")).IsChecked == true && window.FindName("AutoStartSetting") is CheckBox, "settings expose default-on tray closing and autostart");
-                Check(Find<ComboBox>(panel).All(c => c.ActualHeight == 28 && c.ActualWidth == 148), "smaller dropdown dimensions");
-                Check(Find<TextBox>(panel).All(t => t.ActualHeight == 28 && t.ActualWidth == 148), "all inputs including custom DNS share compact dimensions");
+                Check(Find<ComboBox>(panel).All(c => c.ActualHeight == 28 && c.ActualWidth == 136), "further narrowed dropdown dimensions");
+                Check(Find<TextBox>(panel).All(t => t.ActualHeight == 28 && t.ActualWidth == 136), "all inputs including custom DNS share further narrowed dimensions");
                 Check(Find<ComboBox>(panel).All(c => c.FontSize == 13) && Find<TextBox>(panel).All(t => t.FontSize == 13) && Find<CheckBox>(panel).All(c => c.FontSize == 13) && Find<TextBlock>(panel).Single(t => t.Text == "自定义 DNS").FontSize == 14, "settings text sizes stay unchanged while control boxes shrink");
+                Check(!Find<TextBlock>(panel).Any(t => t.Text.Contains("断开后修改")), "obsolete network-settings footer removed");
+                var scroller = (ScrollViewer)window.FindName("PageScroller");
+                var bar = (System.Windows.Controls.Primitives.ScrollBar)scroller.Template.FindName("PART_VerticalScrollBar", scroller);
+                var card = Find<Border>(panel).First();
+                var barLeft = bar.TranslatePoint(new Point(), root).X;
+                Check(bar.Visibility == Visibility.Visible && barLeft >= viewWidth - 18 && card.TranslatePoint(new Point(card.ActualWidth, 0), root).X <= barLeft - 10, "page scrollbar sits at the far right outside the white card with a separate gutter");
+                scroller.ScrollToBottom(); Layout(); Check(scroller.VerticalOffset > 0, "settings can still scroll through the full page");
+                navs.Single(n => (string?)n.Tag == "Home").IsChecked = true; Layout(); nav.IsChecked = true; Layout();
+                Check(scroller.VerticalOffset == 0, "returning to settings always starts at the top");
+                scroller.ScrollToBottom(); Snapshot("settings-bottom"); scroller.ScrollToTop(); Layout();
                 App.ApplyTheme("dark"); Snapshot("settings-dark");
                 App.ApplyTheme("light"); Layout();
             }
@@ -117,9 +135,27 @@ internal static class Program
                 Check(window.FindName("CoreDownloadBar") is ProgressBar && window.FindName("GeoDownloadBar") is ProgressBar && window.FindName("CoreResourceStatus") is TextBlock && window.FindName("GeoResourceStatus") is TextBlock, "each resource card has its own download bar and replacement-status text");
                 var project = Find<TextBlock>((Border)window.FindName("ProductCard")).SelectMany(t => t.Inlines.OfType<System.Windows.Documents.Hyperlink>()).Single();
                 Check(project.NavigateUri.AbsoluteUri == "https://github.com/FuckGFWall/trashvpn-windows" && !new System.Windows.Documents.TextRange(project.ContentStart, project.ContentEnd).Text.Contains("https://"), "project hyperlink hides raw URL and targets this repository");
+                var scroller = (ScrollViewer)window.FindName("PageScroller");
+                about.MinHeight = scroller.ViewportHeight + 300; Layout(); scroller.ScrollToBottom(); Layout(); var wasScrolled = scroller.VerticalOffset > 0;
+                navs.Single(n => (string?)n.Tag == "Home").IsChecked = true; Layout(); nav.IsChecked = true; Layout();
+                Check(wasScrolled && scroller.VerticalOffset == 0, "returning to a scrollable About page also resets to the top");
+                about.MinHeight = 0; Layout();
                 App.ApplyTheme("dark"); Snapshot("about-dark"); App.ApplyTheme("light"); Layout();
             }
-            if (page == "Logs") Check(Find<TextBox>((FrameworkElement)window.FindName("LogsPage")).Single().FontSize == 12 && Find<TextBlock>((FrameworkElement)window.FindName("LogsPage")).Single(t => t.Text == "运行日志").FontSize == 16, "Logs page retains its original text sizes");
+            if (page == "Logs")
+            {
+                var logText = (TextBox)window.FindName("LogText"); var scroller = (ScrollViewer)window.FindName("PageScroller");
+                Check(logText.FontSize == 12 && Find<TextBlock>((FrameworkElement)window.FindName("LogsPage")).Single(t => t.Text == "运行日志").FontSize == 16, "Logs page retains its original text sizes");
+                vm.Log(string.Join('\n', Enumerable.Range(1, 180).Select(i => $"isolated log fixture line {i}"))); Layout();
+                Check(logText.VerticalScrollBarVisibility == ScrollBarVisibility.Disabled && scroller.ScrollableHeight > 0, "long logs use only the outer page scrollbar, not an inner card scrollbar");
+                var internalScroll = (ScrollViewer)logText.Template.FindName("PART_ContentHost", logText);
+                Check(internalScroll.VerticalScrollBarVisibility == ScrollBarVisibility.Disabled && internalScroll.ComputedVerticalScrollBarVisibility != Visibility.Visible && !Find<System.Windows.Controls.Primitives.ScrollBar>(logText).Any(b => b.Visibility == Visibility.Visible), "log TextBox internal scroll container cannot display a second scrollbar");
+                logText.RaiseEvent(new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, -120) { RoutedEvent = UIElement.MouseWheelEvent }); Layout();
+                Check(scroller.VerticalOffset > 0, "mouse wheel over log text scrolls the outer page");
+                Snapshot("logs-outer-scrollbar"); scroller.ScrollToBottom(); Layout();
+                navs.Single(n => (string?)n.Tag == "About").IsChecked = true; Layout(); nav.IsChecked = true; Layout();
+                Check(scroller.VerticalOffset == 0, "returning to logs resets the page to the top");
+            }
         }
         App.ApplyTheme("dark"); Snapshot("home-dark");
         App.ApplyTheme("light");
@@ -138,7 +174,7 @@ internal static class Program
             MenuSnapshot("tray-menu-light");
             var surface = (Border)menu.Template.FindName("TrayMenuSurface", menu);
             Check(surface.CornerRadius.TopLeft == 12 && ReferenceEquals(menu.Background, app.FindResource("PageBrush")), "tray menu uses rounded themed surface instead of legacy white strip");
-            Check(menu.ActualWidth >= 130 && menu.ActualWidth < 160 && menu.FontSize == 12, "tray menu is narrower with smaller text and no excessive right whitespace");
+            Check(menu.ActualWidth >= 108 && menu.ActualWidth < 126 && menu.FontSize == 12, "tray menu is further narrowed without changing its text size");
             Check(menu.Items.Cast<MenuItem>().All(i => Find<Image>(i).Count() == 0 && Find<Grid>(i).Count() == 0), "tray items have no reserved icon / white rectangle column");
             App.ApplyTheme("dark"); MenuSnapshot("tray-menu-dark");
             Check(ReferenceEquals(menu.Background, app.FindResource("PageBrush")), "tray menu follows dark theme resource changes");
@@ -182,6 +218,7 @@ internal static class Program
             Snapshot("about-resources-updated");
             window.DataContext = vm;
         }
+        if (args.Length > 1) IconChecks.CheckExecutable(Check, args[1]);
         vm.Dispose(); window.Close(); app.Shutdown();
         Console.WriteLine($"{count} checks passed; UI previews: {outDir}");
     }

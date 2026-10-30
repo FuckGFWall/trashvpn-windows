@@ -49,6 +49,16 @@ public partial class MainWindow : Window
         AboutPage.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
         LogsPage.Visibility = page == "Logs" ? Visibility.Visible : Visibility.Collapsed;
         PageTitle.Text = page switch { "Settings" => "设置", "About" => "关于", "Logs" => "日志", _ => "首页" };
+        // Navigation is a fresh visit, not a continuation of another page's
+        // offset. Reset again after layout in case its extent just changed.
+        PageScroller.ScrollToTop();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (!closed && PageTitle.Text == (page switch { "Settings" => "设置", "About" => "关于", "Logs" => "日志", _ => "首页" }))
+            {
+                PageScroller.ScrollToTop(); LogText.ScrollToHome();
+            }
+        }));
     }
     private async void ToggleConnection(object sender, RoutedEventArgs e) => await model.ToggleAsync();
     private async void CheckGeo(object sender, RoutedEventArgs e) => await model.GeoAsync(false);
