@@ -61,11 +61,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string Home => engine.Home;
     public bool IsBusy => busy || preparing || switchingModes;
     public bool IsConnected => connected;
+    private bool verifying;
+    public bool IsPowerWorking => connecting || switchingModes || verifying;
+    public bool IsStatusWorking => preparing || IsPowerWorking;
+    public string ConnectionHeading => Status == "已连接（检测中）" ? "已连接" : Status;
+    public string SidebarStatus => preparing && !connected && !connecting ? "正在检查" : Status;
     public bool CanConfigure => !resourcesInstalling && !cleanupFailed && !switchingModes && !exiting && (!busy || preparing) && !connected && settingsReadable;
     public bool CanChangeModes => !resourcesInstalling && !cleanupFailed && !busy && !switchingModes && !exiting && settingsReadable;
     public bool CanToggleFromTray => !resourcesInstalling && !busy && !connecting && !switchingModes && !exiting && settingsReadable;
     public string TrayConnectionLabel => connecting ? "正在连接 VPN…" : connected || cleanupFailed ? "关闭 VPN" : "连接 VPN";
-    public string Status { get => status; private set { status = value; Changed(); } }
+    public string Status { get => status; private set { status = value; Changed(); Changed(nameof(ConnectionHeading)); Changed(nameof(SidebarStatus)); } }
     public string PowerLabel => connecting ? "取消连接" : cleanupFailed ? "重试清理连接" : connected ? "断开连接" : "连接 WARP";
     public string Notice { get => notice; set { notice = value; Changed(); } }
     public string Logs { get => logs; private set { logs = value; Changed(); } }
@@ -76,8 +81,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public string SessionTime { get; private set; } = "点击电源，开启连接";
     public string Upload { get; private set; } = "";
     public string Download { get; private set; } = "";
-    public double[] UploadSamples { get; private set; } = [];
-    public double[] DownloadSamples { get; private set; } = [];
+    public TrafficSeries UploadSeries { get; }
+    public TrafficSeries DownloadSeries { get; }
     public string Protocol { get => settings.Proto; set { if (value != null && value != settings.Proto && CanChangeProtocol) { settings.Proto = value; if (Save() && initialized) StartPreparation(); } } }
     public string Theme { get => settings.Theme; set { if (value != null) { settings.Theme = value; App.ApplyTheme(value); Save(); } } }
     public string Family { get => settings.IpFamily; set { if (value != null && value != settings.IpFamily) { settings.IpFamily = value; if (Save() && initialized) StartPreparation(); } } }
@@ -116,12 +121,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool TunSelected { get => settings.CaptureMode == "tun"; set { if (value) RequestModes("tun", settings.ProxyMode); } }
     public bool GlobalSelected { get => settings.ProxyMode == "global"; set { if (value) RequestModes(settings.CaptureMode, "global"); } }
     public bool SplitSelected { get => settings.ProxyMode == "bypass"; set { if (value) RequestModes(settings.CaptureMode, "bypass"); } }
-    public MainViewModel(IEngineService? service = null, IDesktopIntegration? integration = null, IResourceService? resourceService = null)
+    public MainViewModel(IEngineService? service = null, IDesktopIntegration? integration = null, IResourceService? resourceService = null, TimeProvider? timeProvider = null)
     {
         // Never share the installed client's account, state, or core process.
         engine = service ?? new EngineService(Path.Combine(AppContext.BaseDirectory, "data"));
         desktop = integration ?? new DesktopIntegration();
         resources = resourceService ?? new ResourceService(engine.Home);
+        UploadSeries = new(timeProvider); DownloadSeries = new(timeProvider);
         try { settings = ClientSettings.Load(Home); }
         catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
         { settings = new(); settingsReadable = false; Notice = "无法读取设置，已禁止连接以保护原文件：" + e.Message; }
@@ -277,6 +283,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     var value = root.GetProperty("state").GetString();
                     if (cancelling && value != "disconnected") return;
                     connected = value is "provisional" or "verified";
+                    verifying = value is "provisional" or "verifying";
                     Status = value == "provisional" ? "已连接（检测中）" : value == "verifying" ? "正在验证真实连接" : connected ? "已连接" : "未连接";
                 }
                 else
@@ -377,6 +384,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             // A connect or protocol switch may have begun while disk IO was pending.
             if (busy || switchingModes || disposed || version != generation || revision != sessionRevision) return;
             connected = state.Connected;
+            verifying = connected && state.Verification == "checking";
             if (connected && state.Verification == "failed") cleanupFailed = true;
             Status = connected ? state.Verification == "failed" ? "连接异常，请断开后重试" : state.Verification == "checking" ? "已连接（检测中）" : "已连接" : "未连接";
             ExitIp = connected ? state.ExitIp : "";
@@ -391,13 +399,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     var (up, down) = await engine.TrafficAsync(state.ApiPort);
                     if (busy || switchingModes || disposed || version != generation || revision != sessionRevision) return;
                     Upload = ClientSettings.Speed(up); Download = ClientSettings.Speed(down);
-                    UploadSamples = up > 0 ? UploadSamples.Append(up).TakeLast(45).ToArray() : [];
-                    DownloadSamples = down > 0 ? DownloadSamples.Append(down).TakeLast(45).ToArray() : [];
+                    UploadSeries.Add(up); DownloadSeries.Add(down);
                 }
                 catch (Exception e) when (e is System.Net.Http.HttpRequestException or OperationCanceledException or IOException or System.Text.Json.JsonException)
                 { if (busy || switchingModes || disposed || version != generation || revision != sessionRevision) return; ClearTraffic(); Status = "流量接口不可用"; }
             }
-            else ClearTraffic();
+            else ClearTraffic(disconnected: true);
             Changed("");
             if (resourcesReady && !connected && GeoPending && !resourcesBusy)
                 resourceOperation = ResourceActionCoreAsync("resources-apply", automatic: true);
@@ -419,7 +426,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         { if (busy || switchingModes || disposed || version != generation || revision != sessionRevision) return; ClearTraffic(); Notice = "读取连接状态失败：" + e.Message; Changed(""); }
         finally { polling = false; }
     }
-    private void ClearTraffic() { Upload = Download = ""; UploadSamples = []; DownloadSamples = []; }
+    private void ClearTraffic(bool disconnected = false)
+    {
+        Upload = Download = "";
+        if (disconnected) { UploadSeries.Add(0); DownloadSeries.Add(0); }
+        // An unavailable API is not a measured zero. Only blank the current
+        // labels; history continues to age out using its real timestamps.
+    }
     public async Task InitializeResourcesAsync()
     {
         if (resourcesReady) return;

@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     {
         if (HomePage == null) return;
         var page = (string)((RadioButton)sender).Tag;
+        PageScroller.Visibility = page == "Home" ? Visibility.Collapsed : Visibility.Visible;
         PageHeader.Visibility = page == "Home" ? Visibility.Collapsed : Visibility.Visible;
         HomePage.Visibility = page == "Home" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == "Settings" ? Visibility.Visible : Visibility.Collapsed;

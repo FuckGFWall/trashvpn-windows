@@ -19,8 +19,10 @@ internal static class WorkflowChecks
             var old = fake.Last;
             old.Emit("progress", phase: "register", done: 1, total: 2);
             check(vm.RegistrationProgress == 50, "registration progress reflects engine units");
+            check(vm.IsStatusWorking && !vm.IsPowerWorking && vm.SidebarStatus == "正在检查", "background preparation uses only the small sidebar progress ring");
             var connect = vm.ToggleAsync();
             check(fake.Calls.Count == 1 && vm.CanChangeProtocol, "connect waits for existing preparation without duplicate scan");
+            check(vm.IsPowerWorking && vm.IsStatusWorking, "connection request starts both progress rings while preparing");
             vm.Protocol = "wg";
             PumpUntil(() => fake.Calls.Count == 2);
             check(fake.CancelCount == 1 && fake.Last.Protocol == "wg", "protocol switch cancels and starts new snapshot");
@@ -39,10 +41,12 @@ internal static class WorkflowChecks
             check(vm.ScanProgress == 100 && vm.ScanText.Contains("跳过 10"), "preparation retains its final outcome detail");
             fake.Last.Emit("connection", state: "provisional");
             check(vm.IsConnected && vm.Status.Contains("检测中"), "fast mode exposes provisional connection");
+            check(vm.ConnectionHeading == "已连接" && vm.IsPowerWorking, "provisional connection heading stays connected while the ring indicates verification");
             fake.Last.Emit("connection", state: "disconnected");
             check(!vm.IsConnected, "failed background verification immediately retracts connection");
             fake.Fail(); PumpUntil(() => connect.IsCompleted);
             check(!vm.IsConnected && !vm.IsBusy, "failed connect leaves workflow idle");
+            check(!vm.IsPowerWorking && !vm.IsStatusWorking, "failed connection clears both busy indicators");
 
             vm.VerifyBeforeConnect = true; vm.ScanIntensity = "high";
             PumpUntil(() => fake.Last.Command == "desktop-prepare");
@@ -76,8 +80,27 @@ internal static class WorkflowChecks
             check(!vm.IsPreparing, "closing cancels background preparation cleanly");
             DesktopChecks(check, output);
             VersionOneChecks(check, output);
+            TrafficChecks(check, output);
         }
         finally { SynchronizationContext.SetSynchronizationContext(previous); }
+    }
+
+    private static void TrafficChecks(Action<bool, string> check, string output)
+    {
+        var time = new ManualTimeProvider();
+        var fake = new FakeEngine(Path.Combine(output, "traffic", Guid.NewGuid().ToString("N"))) { Connected = true, Up = 8192, Down = 4096 };
+        using var vm = new MainViewModel(fake, new FakeDesktop(), timeProvider: time);
+        vm.RefreshAsync().GetAwaiter().GetResult();
+        time.Advance(2); fake.Up = 0; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.Upload == "" && vm.UploadSeries.HasVisibleTraffic && vm.DownloadSeries.HasVisibleTraffic, "zero upload cannot clear either traffic history");
+        time.Advance(2); fake.FailTraffic = true; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.UploadSeries.Snapshot().Length == 2 && vm.UploadSeries.HasVisibleTraffic, "transient traffic API errors preserve history without fabricating a zero sample");
+        fake.Connected = false; fake.FailTraffic = false; time.Advance(2); vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.Upload == "" && vm.Download == "" && vm.UploadSeries.HasVisibleTraffic && vm.DownloadSeries.HasVisibleTraffic, "disconnect blanks instantaneous rates but retains both curves");
+        time.Advance(30); fake.Connected = true; fake.Up = fake.Down = 2048; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(vm.UploadSeries.Snapshot().Any(p => p.Value == 8192) && vm.UploadSeries.Snapshot().Last().Value == 2048, "reconnect appends to the same still-visible time window");
+        time.Advance(100); fake.Connected = false; vm.RefreshAsync().GetAwaiter().GetResult();
+        check(!vm.UploadSeries.HasVisibleTraffic && !vm.DownloadSeries.HasVisibleTraffic, "disconnected history disappears only on timed expiry");
     }
 
     private static void VersionOneChecks(Action<bool, string> check, string output)
@@ -355,6 +378,8 @@ internal static class WorkflowChecks
         public bool Connected;
         public string Verification = "verified";
         public int SessionId;
+        public double Up, Down;
+        public bool FailTraffic;
         public TaskCompletionSource<Session>? PendingRead;
         public async Task RunAsync(string command, Action<string> log, string? settingsJson = null, bool prepared = false)
         {
@@ -370,7 +395,7 @@ internal static class WorkflowChecks
         public void Complete() => Last.Finished.TrySetResult();
         public void Fail() => Last.Finished.TrySetException(new IOException("simulated verification failure"));
         public Task<Session> ReadSessionAsync() => PendingRead?.Task ?? Task.FromResult(new Session(Connected, Started: "fixture-" + SessionId, Verification: Verification));
-        public Task<(double Up, double Down)> TrafficAsync(int port) => Task.FromResult((0d, 0d));
+        public Task<(double Up, double Down)> TrafficAsync(int port) => FailTraffic ? Task.FromException<(double, double)>(new IOException("fixture traffic unavailable")) : Task.FromResult((Up, Down));
         public void Dispose() { }
     }
     private sealed class Call(string command, Action<string> log, string settings, bool prepared)
