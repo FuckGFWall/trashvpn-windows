@@ -568,7 +568,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		emit(stepMsg{done: true, label: "Ports", summary: fmt.Sprintf("sweeping all %d known ports (phase 1 skipped)", len(warpPorts))})
 	}
 	if !run.isMASQUE() && opts.port == 0 && opts.sweepPorts != sweepAll {
-		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, opts.tunnelParallel, emit)
+		open, err := reachablePorts(ctx, run, ips, timeout, scanPortSamples(opts), opts.tunnelParallel, emit)
 		if err != nil {
 			emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
 			return phaseResult{}, err
@@ -584,54 +584,17 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		ports = warpPorts
 	}
 	targets := probeTargets(run, opts.sweepPorts != "", ips, ports)
-	results := make([]endpointResult, len(targets))
-	pings := opts.tunPingCount
 	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
 	emit(barBeginMsg{label: label, total: len(targets)})
-	// Early stop: a connect needs one working endpoint, not all of them, and the
-	// user is waiting on this scan. Once enough are verified the remaining jobs
-	// return immediately, so the pool drains fast instead of paying a full
-	// handshake per candidate. Only the connect path sets earlyStop; a plain
-	// `scan` (and the GUI's endpoint list) still measures everything.
-	var goodCount int32
-	earlyStop := opts.earlyStop
-	work := func(tn tunnel, i int) {
-		defer emit(probedMsg{})
-		if earlyStop > 0 && atomic.LoadInt32(&goodCount) >= int32(earlyStop) {
-			return
-		}
-		ip := targets[i].ip
-		r := endpointResult{ip: ip}
-		if t, endpoint, ok, rtt, loss, torn := tunnelProbe(ctx, tn, targets[i], timeout, pings, opts.wantMeta); ok {
-			r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
-			if pings > 0 {
-				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !torn
-			}
-			// Host ICMP measures the direct path, which a nested run does not take;
-			// from inside the outer tunnel the same echo walks the real one.
-			if outer == nil {
-				if hrtt, pok := pingHost(ip, timeout); pok {
-					r.epPing = hrtt
-				}
-			} else if hrtt, pok := outer.pingTo(ip, timeout); pok {
-				r.epPing = hrtt
-			}
-			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, torn: !r.durable}
-			if opts.wantMeta {
-				found.exit, found.colo = exitRegion(t), exitColo(t)
-			}
-			emit(found)
-		}
-		if r.durable {
-			atomic.AddInt32(&goodCount, 1)
-		}
-		results[i] = r
-	}
-	if err := runTunnelPool(opts.tunnelParallel, run, len(targets), work); err != nil {
+	results, err := verifyTargets(ctx, opts, run, targets, emit,
+		func() (tunnel, error) { return newTunnel(run) },
+		func(ctx context.Context, tn tunnel, target probeTarget) endpointResult {
+			return scanCandidate(ctx, tn, target, opts, timeout)
+		})
+	if err != nil {
 		emit(stepMsg{fail: true, summary: err.Error()})
 		return phaseResult{}, err
 	}
-	emit(barEndMsg{label: label, summary: "done"})
 
 	emit(doneMsg{})
 	return phaseResult{run, results}, nil

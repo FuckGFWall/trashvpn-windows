@@ -258,6 +258,7 @@ func scanKeyFor(opts options) string {
 // for a chain (the outer half comes from the `outer` nest), the protocol
 // itself otherwise.
 func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRun, error) {
+	desktopScanBegin(opts.proto)
 	store, err := cache.Open(cache.Options{TTL: scanTTL})
 	if err != nil {
 		return nil, protoRun{}, err
@@ -267,7 +268,13 @@ func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRu
 		if raw, ok := store.Get(key); ok {
 			var cs cachedScan
 			if json.Unmarshal(raw, &cs) == nil && cs.Proto == scanKeyFor(opts) && cs.IPv6 == opts.ipv6 && (opts.scanIntensity == "" || cs.Intensity == opts.scanIntensity) {
-				desktopProgress("scan", "缓存已就绪", 1, 1)
+				usable := 0
+				for _, ce := range cs.Results {
+					if ce.Working && ce.Endpoint != "" {
+						usable++
+					}
+				}
+				desktopScanReady(usable, true)
 				if opts.through != "" {
 					stageMsg(fmt.Sprintf("[%s] 使用缓存端点（%d 个，扫描于 %s）",
 						protoLabel(opts.proto), len(cs.Results), cs.At.Format("01-02 15:04")))
@@ -285,7 +292,7 @@ func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRu
 	if opts.scanned != nil {
 		*opts.scanned = true
 	}
-	desktopProgress("scan", "开始优选", 0, 0)
+	desktopScanNote("start", "准备候选地址与端口")
 	results, run, err := doScan(ctx, opts)
 	if err != nil {
 		return nil, run, err
@@ -296,11 +303,12 @@ func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRu
 	stageMsg(fmt.Sprintf("[%s] 端点扫描完成（%d 个结果）", protoLabel(opts.proto), len(results)))
 	// The cache's Proto records the user-facing protocol the scan ran under
 	// ("wwarp" for chains) so a later read can tell the two apart.
-	desktopProgress("scan", "优选完成", 1, 1)
+	desktopScanNote("cache-write", "保存节点缓存")
 	cs := cachedScan{Intensity: opts.scanIntensity, Proto: scanKeyFor(opts), IPv6: opts.ipv6, At: time.Now(), Results: results}
 	if raw, err := json.Marshal(cs); err == nil {
 		_ = store.Put(key, raw)
 	}
+	desktopScanReady(len(results), false)
 	return results, run, nil
 }
 
@@ -330,6 +338,7 @@ func doScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRun, erro
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if opts.through != "" {
+		desktopScanNote("outer-dial", "建立外层隧道，准备内层验证")
 		n, err := dialOuter(ctx, opts, time.Duration(opts.timeoutSec)*time.Second)
 		if err != nil {
 			return nil, run, err
@@ -352,6 +361,7 @@ func doScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRun, erro
 	if filtered(opts) {
 		ph = applyFilters(ph, opts)
 	}
+	desktopScanNote("rank", "筛选可用节点并按丢包与延迟排序")
 
 	return projectCacheEndpoints(ph), run, nil
 }

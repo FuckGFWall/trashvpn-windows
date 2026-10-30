@@ -92,6 +92,9 @@ func dialOuter(ctx context.Context, o options, timeout time.Duration) (*nest, er
 	var tn tunnel
 	var lastErr error
 	for _, p := range ports {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		ep := netip.AddrPortFrom(ap.Addr(), p).String()
 		t, derr := dialOuterWithItsKeys(ctx, run, ep, timeout)
 		if derr == nil {
@@ -183,17 +186,23 @@ func dialOuterWithItsKeys(ctx context.Context, run protoRun, endpoint string, ti
 // The nested answer to pingHost: ICMP from inside the outer tunnel to the inner
 // endpoint, which is the path the inner tunnel's packets actually take. Needs no
 // privileges - it runs in netstack, like the in-tunnel ping.
-func (n *nest) pingTo(dst netip.Addr, timeout time.Duration) (time.Duration, bool) {
+func (n *nest) pingTo(ctx context.Context, dst netip.Addr, timeout time.Duration) (time.Duration, bool) {
+	if ctx.Err() != nil {
+		return 0, false
+	}
 	pc, err := n.net.DialPingAddr(netip.Addr{}, dst)
 	if err != nil {
 		return 0, false
 	}
-	defer pc.Close()
+	defer closeOnCancel(ctx, pc)()
 
 	var total time.Duration
 	got := 0
 	buf := make([]byte, 1500)
 	for seq := 0; seq < pingProbes; seq++ {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		start := time.Now()
 		if !sendEchoTo(pc, dst, seq) {
 			continue
@@ -206,7 +215,7 @@ func (n *nest) pingTo(dst netip.Addr, timeout time.Duration) (time.Duration, boo
 			}
 		}
 	}
-	if got == 0 {
+	if ctx.Err() != nil || got == 0 {
 		return 0, false
 	}
 	return total / time.Duration(got), true

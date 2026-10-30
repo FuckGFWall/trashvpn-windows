@@ -34,11 +34,14 @@ func applyScanIntensity(o *options, level string) {
 	switch level {
 	case "low":
 		o.perSubnet, o.earlyStop = 1, 2
+		o.portSamples = 4
 	case "high":
 		o.perSubnet, o.earlyStop = 8, 8
+		o.portSamples = 12
 	default:
 		level = "medium"
 		o.perSubnet, o.earlyStop = 3, 4
+		o.portSamples = 8
 	}
 	o.scanIntensity = level
 }

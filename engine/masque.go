@@ -400,7 +400,8 @@ type masqueTunnel struct {
 	drop func()
 	// peer is the endpoint the live connection belongs to: a second handshake
 	// against the same peer is wasted work, a different one is a real swap.
-	peer string
+	peer  string
+	pumps sync.WaitGroup
 }
 
 // samePeer reports whether the live connection already serves this endpoint.
@@ -439,7 +440,8 @@ func newMasqueTunnel(h2 bool) (*masqueTunnel, error) {
 	}
 
 	t := &masqueTunnel{ipStack: stack, dev: dev, tlsCfg: tlsCfg, h2: h2}
-	go t.pumpOut()
+	t.pumps.Add(1)
+	go func() { defer t.pumps.Done(); t.pumpOut() }()
 	return t, nil
 }
 
@@ -450,6 +452,7 @@ func (t *masqueTunnel) stack() *ipStack { return t.ipStack }
 func (t *masqueTunnel) Close() {
 	t.dropPeer()
 	t.dev.Close()
+	t.pumps.Wait()
 }
 
 func (t *masqueTunnel) dropPeer() {
@@ -504,7 +507,7 @@ func (t *masqueTunnel) pumpIn(ctx context.Context, conn *connectip.Conn) {
 
 // ConnectTunnel dispatches on the address type, not on the useHTTP2 flag alone:
 // HTTP/2 needs a TCPAddr and HTTP/3 a UDPAddr.
-func (t *masqueTunnel) resolveEndpoint(endpoint string) (net.Addr, error) {
+func (t *masqueTunnel) resolveEndpoint(ctx context.Context, endpoint string) (net.Addr, error) {
 	host, portStr, err := net.SplitHostPort(endpoint)
 	if err != nil {
 		return nil, err
@@ -515,7 +518,7 @@ func (t *masqueTunnel) resolveEndpoint(endpoint string) (net.Addr, error) {
 	}
 	// An IP literal never touches the resolver: that is the normal case (the
 	// pools are addresses), and it must stay allocation- and DNS-free.
-	addr, err := resolveFast(context.Background(), host)
+	addr, err := resolveFast(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -560,6 +563,9 @@ func resolveFast(ctx context.Context, host string) (netip.Addr, error) {
 // weaker signal: measured on a filtered network, every endpoint dialled and only
 // two passed data, so callers must still verify with /meta or a ping.
 func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	// Session reuse, the client-side half of "reuse the CID/session instead of
 	// a full handshake": asking the same peer for a second tunnel while the
 	// first is still up only costs a fresh CONNECT-IP exchange (and, on a
@@ -582,7 +588,7 @@ func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout t
 		timeout = time.Second
 	}
 
-	remote, err := t.resolveEndpoint(endpoint)
+	remote, err := t.resolveEndpoint(ctx, endpoint)
 	if err != nil {
 		noteMasqueUnhealthy()
 		return false
@@ -606,7 +612,8 @@ func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout t
 			MaxIdleTimeout: masqueIdleTimeout(),
 		},
 		remote, t.h2, outer)
-	if err != nil || !dialDeadline.Stop() {
+	deadlineStopped := dialDeadline.Stop()
+	if err != nil || !deadlineStopped || ctx.Err() != nil {
 		if ctx.Err() == nil && masqueDialErrors.Add(1) <= 3 {
 			reason := "CONNECT-IP exchange failed"
 			if dialCtx.Err() != nil {
@@ -634,8 +641,9 @@ func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout t
 		return false
 	}
 
-	pumpCtx, cancelPump := context.WithCancel(context.Background())
-	go t.pumpIn(pumpCtx, conn)
+	pumpCtx, cancelPump := context.WithCancel(ctx)
+	t.pumps.Add(1)
+	go func() { defer t.pumps.Done(); t.pumpIn(pumpCtx, conn) }()
 
 	t.mu.Lock()
 	t.conn = conn

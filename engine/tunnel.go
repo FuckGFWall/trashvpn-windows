@@ -103,6 +103,9 @@ func (t *wgTunnel) attempts() int   { return 1 }
 func (t *wgTunnel) stack() *ipStack { return t.ipStack }
 
 func (t *wgTunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
 		return false
@@ -156,6 +159,9 @@ func tunnelProbe(ctx context.Context, t tunnel, target probeTarget, timeout time
 
 func tunnelConnect(ctx context.Context, t tunnel, ip netip.Addr, timeout time.Duration) bool {
 	for _, port := range t.ports() {
+		if ctx.Err() != nil {
+			return false
+		}
 		if t.handshake(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(port)), timeout) {
 			return true
 		}
@@ -164,6 +170,7 @@ func tunnelConnect(ctx context.Context, t tunnel, ip netip.Addr, timeout time.Du
 }
 
 func probeEndpoint(ctx context.Context, t tunnel, endpoint string, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, rtt time.Duration, loss float32, torn, ok bool) {
+	probeStep(ctx, "握手")
 	if !t.handshake(ctx, endpoint, timeout) {
 		return metaResult{}, 0, 0, false, false
 	}
@@ -175,8 +182,8 @@ func probeEndpoint(ctx context.Context, t tunnel, endpoint string, timeout time.
 		if pings <= 0 {
 			return metaResult{}, 0, 0, false, true
 		}
-		rtt, loss, torn = st.durability(pings, timeout)
-		return metaResult{}, rtt, loss, torn, true
+		rtt, loss, torn = st.durability(ctx, pings, timeout)
+		return metaResult{}, rtt, loss, torn, ctx.Err() == nil
 	}
 
 	body, ok := st.fetch(ctx, timeout)
@@ -186,20 +193,22 @@ func probeEndpoint(ctx context.Context, t tunnel, endpoint string, timeout time.
 	if pings <= 0 {
 		return parseMeta(body), 0, 0, false, true
 	}
-	rtt, loss, torn = st.durability(pings, timeout)
-	return parseMeta(body), rtt, loss, torn, true
+	rtt, loss, torn = st.durability(ctx, pings, timeout)
+	return parseMeta(body), rtt, loss, torn, ctx.Err() == nil
 }
 
 // A real DPI teardown stays dead across both bursts; transient loss does not,
 // so the second burst's numbers are the ones reported when the first was noise.
 // Running right after the meta fetch lets the burst read the tunnel's state once a
 // real request has already given DPI something to kill.
-func (s *ipStack) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
-	rtt, loss, torn := s.tunnelPing(count, timeout)
-	if !torn {
+func (s *ipStack) durability(ctx context.Context, count int, timeout time.Duration) (time.Duration, float32, bool) {
+	probeStep(ctx, "稳定性")
+	rtt, loss, torn := s.tunnelPing(ctx, count, timeout)
+	if ctx.Err() != nil || !torn {
 		return rtt, loss, false
 	}
-	rtt2, loss2, torn2 := s.tunnelPing(count, timeout)
+	probeStep(ctx, "稳定性复测")
+	rtt2, loss2, torn2 := s.tunnelPing(ctx, count, timeout)
 	if !torn2 {
 		return rtt2, loss2, false
 	}
@@ -209,10 +218,12 @@ func (s *ipStack) durability(count int, timeout time.Duration) (time.Duration, f
 func (s *ipStack) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	probeStep(ctx, "隧道 DNS")
 	if !resolveMetaAddr(reqCtx, s.tnet) {
 		return "", false
 	}
 	s.client.Timeout = timeout
+	probeStep(ctx, "出口 HTTPS")
 	return fetchMeta(reqCtx, s.client, metaURL)
 }
 
@@ -285,7 +296,7 @@ func resolveMetaAddr(ctx context.Context, tnet *netstack.Net) bool {
 	if metaAddr.Load() != nil {
 		return true
 	}
-	ips, err := tnet.LookupContextHost(ctx, metaHost)
+	ips, err := lookupTunnelHost(ctx, tnet, metaHost)
 	if err != nil || len(ips) == 0 {
 		return false
 	}
@@ -317,7 +328,10 @@ var (
 	pingAddr   atomic.Pointer[netip.Addr]
 )
 
-func pingDst(tnet *netstack.Net, timeout time.Duration) (netip.Addr, bool) {
+func pingDst(parent context.Context, tnet *netstack.Net, timeout time.Duration) (netip.Addr, bool) {
+	if parent.Err() != nil {
+		return netip.Addr{}, false
+	}
 	if a := pingAddr.Load(); a != nil {
 		return *a, true
 	}
@@ -325,9 +339,9 @@ func pingDst(tnet *netstack.Net, timeout time.Duration) (netip.Addr, bool) {
 		pingAddr.CompareAndSwap(nil, &a)
 		return a, true
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	ips, err := tnet.LookupContextHost(ctx, pingTarget)
+	ips, err := lookupTunnelHost(ctx, tnet, pingTarget)
 	if err != nil || len(ips) == 0 {
 		return netip.Addr{}, false
 	}
@@ -368,8 +382,8 @@ const (
 // matched by sequence in a shared window: a reply merely delayed by a contended
 // netstack (many userspace tunnels at once) still counts instead of scoring as
 // a loss.
-func (s *ipStack) tunnelPing(count int, timeout time.Duration) (time.Duration, float32, bool) {
-	dst, ok := pingDst(s.tnet, timeout)
+func (s *ipStack) tunnelPing(ctx context.Context, count int, timeout time.Duration) (time.Duration, float32, bool) {
+	dst, ok := pingDst(ctx, s.tnet, timeout)
 	if !ok {
 		return 0, 1, false
 	}
@@ -377,7 +391,7 @@ func (s *ipStack) tunnelPing(count int, timeout time.Duration) (time.Duration, f
 	if err != nil {
 		return 0, 1, false
 	}
-	defer pc.Close()
+	defer closeOnCancel(ctx, pc)()
 
 	sent := make([]time.Time, count)
 	got := make([]bool, count)
@@ -387,6 +401,9 @@ func (s *ipStack) tunnelPing(count int, timeout time.Duration) (time.Duration, f
 
 	drain := func(deadline time.Time) {
 		for n < count {
+			if ctx.Err() != nil {
+				return
+			}
 			pc.SetReadDeadline(deadline)
 			m, err := pc.Read(buf)
 			if err != nil {
@@ -403,6 +420,9 @@ func (s *ipStack) tunnelPing(count int, timeout time.Duration) (time.Duration, f
 	}
 
 	for seq := 0; seq < count; seq++ {
+		if ctx.Err() != nil {
+			return 0, 1, false
+		}
 		if s.sendEcho(pc, seq) {
 			sent[seq] = time.Now()
 		}
@@ -410,6 +430,9 @@ func (s *ipStack) tunnelPing(count int, timeout time.Duration) (time.Duration, f
 	}
 	drain(time.Now().Add(timeout)) // final window for stragglers before scoring loss
 
+	if ctx.Err() != nil {
+		return 0, 1, false
+	}
 	return pingSummary(total, n), lossFraction(n, count), teardown(got)
 }
 
@@ -486,7 +509,13 @@ func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duratio
 		if err == nil && handshakeDone(conf) {
 			return true
 		}
-		time.Sleep(wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
 		if wait < handshakePollMax {
 			wait *= 2
 		}

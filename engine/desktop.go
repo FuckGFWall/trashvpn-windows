@@ -54,7 +54,9 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 	previousStage := connectStage
 	connectStage = func(s string) { fmt.Println(s) }
 	desktopEvents = true
-	defer func() { connectStage = previousStage; desktopEvents = false }()
+	desktopScan = &scanProgressTracker{chain: s.Proto == protoWWarp || s.Proto == protoMASQUEMASQUE,
+		send: func(e map[string]any) { desktopEvent(e) }}
+	defer func() { connectStage = previousStage; desktopScan = nil; desktopEvents = false }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -78,8 +80,11 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 		if !prepare {
 			_ = runDisconnectCmd(context.Background(), o)
 		}
-	} else if !prepare {
-		desktopConnection("verified")
+	} else {
+		desktopScan.finish()
+		if !prepare {
+			desktopConnection("verified")
+		}
 	}
 	return err
 }

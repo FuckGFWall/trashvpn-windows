@@ -6,9 +6,10 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
+	"sync"
 
 	connectip "github.com/Diniboy1123/connect-ip-go"
-	"github.com/Diniboy1123/usque/api"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/yosida95/uritemplate/v3"
@@ -47,11 +48,28 @@ func dialMasqueTransport(ctx context.Context, cfg *tls.Config, qc *quic.Config, 
 		}
 		return c, closeAll, err
 	}
-	if via == nil {
-		udp, tr, c, _, err := api.ConnectTunnel(ctx, cfg, qc, masqueConnectURI, remote, false)
-		return c, func() { closeMasqueTransport(udp, tr, c) }, err
+	for attempt := 0; ; attempt++ {
+		c, closeAll, err := dialMasqueH3(ctx, cfg, qc, remote, via)
+		// Preserve the upstream's one retry for transient protocol violations.
+		if err == nil || ctx.Err() != nil || via != nil || attempt > 0 || !strings.Contains(err.Error(), "PROTOCOL_VIOLATION") {
+			return c, closeAll, err
+		}
+		closeAll()
 	}
-	packet, err := via.net.ListenUDPAddrPort(netip.AddrPortFrom(via.local, 0))
+}
+
+func dialMasqueH3(ctx context.Context, cfg *tls.Config, qc *quic.Config, remote net.Addr, via *nest) (*connectip.Conn, func(), error) {
+	var packet net.PacketConn
+	var err error
+	if via != nil {
+		packet, err = via.net.ListenUDPAddrPort(netip.AddrPortFrom(via.local, 0))
+	} else {
+		local := net.IPv4zero
+		if addr, ok := remote.(*net.UDPAddr); ok && addr.IP.To4() == nil {
+			local = net.IPv6zero
+		}
+		packet, err = net.ListenUDP("udp", &net.UDPAddr{IP: local})
+	}
 	if err != nil {
 		return nil, func() {}, err
 	}
@@ -63,14 +81,25 @@ func dialMasqueTransport(ctx context.Context, cfg *tls.Config, qc *quic.Config, 
 		return nil, func() {}, err
 	}
 	tr := &http3.Transport{EnableDatagrams: true, AdditionalSettings: map[uint64]uint64{0x276: 1}, DisableCompression: true}
+	// connect-ip-go's ReadResponse does not observe ctx after the stream was
+	// opened. Closing QUIC on cancellation also interrupts that network wait.
+	stop := context.AfterFunc(ctx, func() { _ = q.CloseWithError(0, "scan canceled") })
 	c, _, err := connectip.Dial(ctx, tr.NewClientConn(q), uritemplate.MustNew(masqueConnectURI), "cf-connect-ip", http.Header{"User-Agent": {""}}, true)
-	return c, func() {
-		if c != nil {
-			c.Close()
-		}
-		tr.Close()
-		q.CloseWithError(0, "closed")
-		qt.Close()
-		packet.Close()
-	}, err
+	var once sync.Once
+	closeAll := func() {
+		once.Do(func() {
+			stop()
+			_ = q.CloseWithError(0, "closed")
+			if c != nil {
+				_ = c.Close()
+			}
+			_ = tr.Close()
+			_ = qt.Close()
+			_ = packet.Close()
+		})
+	}
+	if err != nil {
+		closeAll()
+	}
+	return c, closeAll, err
 }

@@ -124,7 +124,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             if (version != generation || disposed) return false;
             prepared = true;
             RegistrationProgress = ScanProgress = 100;
-            RegistrationText = "注册 · 已就绪"; ScanText = "优选 · 缓存已就绪";
+            RegistrationText = "注册 · 已就绪";
             return true;
         }
         catch (Exception e)
@@ -162,7 +162,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     var done = root.GetProperty("done").GetDouble(); var total = root.GetProperty("total").GetDouble();
                     var percent = total > 0 ? Math.Clamp(done * 100 / total, 0, 100) : 0;
                     if (phase == "register") { RegistrationText = "注册 · " + text; RegistrationProgress = percent; RegistrationIndeterminate = total <= 0; }
-                    if (phase == "scan") { ScanText = "优选 · " + (text.StartsWith("Phase") ? "探测与验证节点" : text); ScanProgress = percent; ScanIndeterminate = total <= 0; }
+                    if (phase == "scan") { ScanText = "优选 · " + text; ScanProgress = Math.Max(ScanProgress, percent); ScanIndeterminate = total <= 0 && ScanProgress == 0; }
                     if (phase == "error") { ScanText = "优选 · 未完成，请查看提示"; RegistrationIndeterminate = ScanIndeterminate = false; }
                 }
                 Changed("");

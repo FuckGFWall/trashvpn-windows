@@ -20,6 +20,7 @@ type options struct {
 	prepareOnly   bool
 	optimistic    bool
 	scanIntensity string
+	portSamples   int
 
 	tunnelParallel int
 	timeoutSec     int

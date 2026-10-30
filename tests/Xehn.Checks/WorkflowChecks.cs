@@ -28,9 +28,15 @@ internal static class WorkflowChecks
             check(vm.ScanProgress != 99, "late progress from previous protocol is ignored");
             fake.Last.Emit("progress", phase: "scan", done: 2, total: 8);
             check(vm.ScanProgress == 25, "scan progress reflects actual candidates");
+            fake.Last.Emit("progress", phase: "scan", done: 0, total: 100, text: "补充探测备用端口");
+            check(vm.ScanProgress == 25 && vm.ScanText.Contains("备用端口"), "phase change preserves total progress and detailed step text");
+            fake.Last.Emit("progress", phase: "scan", done: 90, total: 100, text: "验证隧道 · 完成 4/14 · 可用 2/2 · 跳过 10");
+            fake.Last.Emit("progress", phase: "scan", done: 30, total: 100, text: "保存节点缓存 · 跳过 10");
+            check(vm.ScanProgress == 90 && vm.ScanText.Contains("跳过 10"), "late lower progress does not roll back the progress bar");
             fake.Complete();
             PumpUntil(() => fake.Last.Command == "desktop-connect");
             check(fake.Calls.Count == 3 && fake.Last.Protocol == "wg" && fake.Last.Prepared, "pending connect follows latest prepared protocol");
+            check(vm.ScanProgress == 100 && vm.ScanText.Contains("跳过 10"), "preparation retains its final outcome detail");
             fake.Last.Emit("connection", state: "provisional");
             check(vm.IsConnected && vm.Status.Contains("检测中"), "fast mode exposes provisional connection");
             fake.Last.Emit("connection", state: "disconnected");
@@ -118,6 +124,6 @@ internal static class WorkflowChecks
         public string Protocol => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.Proto;
         public bool VerifyBeforeConnect => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.VerifyBeforeConnect;
         public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public void Emit(string type, string phase = "", string state = "", int done = 0, int total = 0) => log("@@XEHN " + JsonSerializer.Serialize(new { type, phase, state, done, total, text = "test" }));
+        public void Emit(string type, string phase = "", string state = "", int done = 0, int total = 0, string text = "test") => log("@@XEHN " + JsonSerializer.Serialize(new { type, phase, state, done, total, text }));
     }
 }

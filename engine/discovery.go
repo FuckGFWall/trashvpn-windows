@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,13 @@ func fetchMeta(ctx context.Context, client *http.Client, url string) (string, bo
 }
 
 const portProbeSample = 12
+
+func scanPortSamples(opts options) int {
+	if opts.portSamples > 0 {
+		return opts.portSamples
+	}
+	return portProbeSample // CLI scans retain their full default sample.
+}
 
 func haveAddrFamily(v6 bool) bool {
 	addrs, err := net.InterfaceAddrs()
@@ -115,14 +123,31 @@ func reachablePorts(ctx context.Context, run protoRun, ips []netip.Addr, timeout
 // Sequentially this cost 4+50 ports x -timeout per dead address, measured at 109s
 // on an address that answers nothing, times the whole sample.
 func probePorts(ctx context.Context, run protoRun, ips []netip.Addr, ports []int, timeout time.Duration, jobs int, emit emitter, label string) ([]int, error) {
+	return probePortsWithFactory(ctx, ips, ports, timeout, jobs, emit, label, func() (tunnel, error) { return newTunnel(run) })
+}
+
+func probePortsWithFactory(ctx context.Context, ips []netip.Addr, ports []int, timeout time.Duration, jobs int, emit emitter, label string, create func() (tunnel, error)) ([]int, error) {
 	emit(barBeginMsg{label: label, total: len(ips)})
+	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var mu sync.Mutex
 	open := make(map[int]bool)
-	err := runTunnelPool(jobs, run, len(ips), func(tn tunnel, i int) {
-		defer emit(probedMsg{})
+	completed := 0
+	stage := "ports-primary"
+	if strings.Contains(label, "alternate") {
+		stage = "ports-alternate"
+	}
+	report := func(finished bool) {
+		skipped := 0
+		if finished {
+			skipped = len(ips) - completed
+		}
+		emit(scanProgressMsg{stage: stage, completed: completed, succeeded: len(open), skipped: skipped, total: len(ips), finished: finished})
+	}
+	report(false)
+	err := runTunnelWorkers(ctx, jobs, len(ips), create, func(tn tunnel, i int) {
 		found := make(map[int]bool)
 		for _, port := range ports {
 			if ctx.Err() != nil {
@@ -132,17 +157,24 @@ func probePorts(ctx context.Context, run protoRun, ips []netip.Addr, ports []int
 				found[port] = true
 			}
 		}
-		if len(found) == 0 {
+		mu.Lock()
+		defer mu.Unlock()
+		if ctx.Err() != nil {
 			return
 		}
-		mu.Lock()
-		if len(open) == 0 {
+		completed++
+		if len(found) > 0 && len(open) == 0 {
 			open = found
+			cancel()
 		}
-		mu.Unlock()
-		cancel()
+		emit(probedMsg{})
+		report(false)
 	})
-	if err != nil {
+	report(true)
+	if parent.Err() != nil {
+		return nil, parent.Err()
+	}
+	if err != nil && len(open) == 0 {
 		return nil, err
 	}
 
@@ -165,17 +197,23 @@ const (
 	pingID     = 0xbeef
 )
 
-func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
+func pingHost(ctx context.Context, addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
+	if ctx.Err() != nil {
+		return 0, false
+	}
 	conn, dst := listenPing(addr)
 	if conn == nil {
 		return 0, false
 	}
-	defer conn.Close()
+	defer closeOnCancel(ctx, conn)()
 
 	_, replyType := icmpEchoTypes(dst)
 	sent := make([]time.Time, pingProbes)
 	got := make([]bool, pingProbes)
 	for seq := range sent {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		if sendHostEcho(conn, dst, seq) {
 			sent[seq] = time.Now()
 		}
@@ -186,6 +224,9 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 	buf := make([]byte, 1500)
 	deadline := time.Now().Add(timeout)
 	for n < pingProbes {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		conn.SetReadDeadline(deadline)
 		m, peer, err := conn.ReadFrom(buf)
 		if err != nil {
@@ -206,7 +247,7 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 		total += time.Since(sent[echo.Seq])
 		n++
 	}
-	if n == 0 {
+	if ctx.Err() != nil || n == 0 {
 		return 0, false
 	}
 	return total / time.Duration(n), true

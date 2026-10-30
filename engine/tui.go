@@ -71,7 +71,6 @@ func plainEmit(msg tea.Msg) {
 		plainTotal.Store(int64(m.total))
 		plainStep.Store(int64(max(1, m.total/plainProgressSteps)))
 		plainDone.Store(0)
-		desktopProgress("scan", m.label, 0, m.total)
 		fmt.Fprintf(plainOut, "%s: %d...\n", m.label, m.total)
 	case probedMsg:
 		step, total := plainStep.Load(), plainTotal.Load()
@@ -79,7 +78,6 @@ func plainEmit(msg tea.Msg) {
 			return
 		}
 		done := plainDone.Add(1)
-		desktopProgress("scan", "正在探测候选节点", int(done), int(total))
 		if done%step == 0 && done < total {
 			fmt.Fprintf(plainOut, "  %d/%d\n", done, total)
 		}
@@ -94,6 +92,10 @@ func plainEmit(msg tea.Msg) {
 		fmt.Fprintf(plainOut, "  %-22s %s\n", m.endpoint, speedStr(m.mbps))
 	case barEndMsg:
 		fmt.Fprintf(plainOut, "%s: %s\n", m.label, m.summary)
+	case scanProgressMsg:
+		if desktopScan != nil {
+			desktopScan.update(m)
+		}
 	}
 }
 
