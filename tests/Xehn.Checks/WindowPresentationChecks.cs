@@ -4,6 +4,8 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using Xehn.App;
 
+#pragma warning disable WPF0001 // Match the app's .NET 10 Fluent ThemeMode opt-in.
+
 internal static class WindowPresentationChecks
 {
     public static void Run(Action<bool, string> check)
@@ -41,18 +43,35 @@ internal static class WindowPresentationChecks
             fixture.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
             check((GetWindowLong(handle, -16) & 0x10000) == 0, "WPF initial show keeps the native maximize button disabled");
             fixture.Hide();
+            var activations = new List<nint>();
+            nint ObserveFrame(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+            {
+                if (message == 0x86) activations.Add(wParam);
+                return 0;
+            }
+            var source = HwndSource.FromHwnd(handle);
+            source.AddHook(ObserveFrame);
             foreach (var theme in new[] { "dark", "light", "dark", "light" })
             {
                 App.ApplyTheme(theme);
                 var background = ((SolidColorBrush)Application.Current.FindResource("PageBrush")).Color;
                 var foreground = ((SolidColorBrush)Application.Current.FindResource("InkBrush")).Color;
+                var focus = GetForegroundWindow();
+                GetWindowRect(handle, out var bounds);
+                activations.Clear();
                 var applied = WindowPresentation.ApplyTitleBar(fixture, App.IsDarkTheme, background, foreground);
+                fixture.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
                 var darkResult = DwmGetWindowAttribute(handle, 20, out var dark, sizeof(int));
+                check(Application.Current.ThemeMode == (theme == "dark" ? ThemeMode.Dark : ThemeMode.Light), "WPF Fluent theme state matches the requested caption theme after dispatcher work");
                 check(applied.DarkModeApplied && darkResult == 0 && dark == (theme == "dark" ? 1 : 0), $"native title-bar dark flag follows {theme} theme");
+                GetWindowRect(handle, out var after);
+                check(activations.Count >= 2 && activations[^1] == (fixture.IsActive ? 1 : 0) && focus == GetForegroundWindow() && bounds.Equals(after) && fixture.WindowState == WindowState.Normal,
+                    "caption repaint restores actual activation state without stealing focus, moving or resizing");
                 if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
                     check(applied.CaptionColorsApplied, $"Windows 11 accepts app-specific {theme} caption / text colors");
                 else check(!applied.CaptionColorsApplied, "Windows 10 gracefully falls back to native light / dark caption without Windows 11-only colors");
             }
+            source.RemoveHook(ObserveFrame);
             App.ApplyTheme("auto");
             check(App.IsDarkTheme == ((int?)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) == 0), "automatic title-bar theme resolves the actual system setting without modifying it");
             WindowPresentation.FitToWorkArea(fixture, center: true, fixedWidth: 800);
@@ -94,4 +113,5 @@ internal static class WindowPresentationChecks
     [DllImport("user32.dll")] private static extern uint GetMenuState(nint menu, uint item, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessage(nint window, int message, nint wParam, nint lParam);
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsZoomed(nint window);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
 }

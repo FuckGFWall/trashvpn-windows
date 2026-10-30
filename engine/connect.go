@@ -1108,11 +1108,9 @@ func socks5Dial(ctx context.Context, socksPort int, addr string, timeout time.Du
 
 // startAndVerify renders the config for one endpoint, starts the core, and
 // proves the tunnel passes traffic through the local mixed port — all BEFORE
-// the system proxy is touched, so the host is never pointed at a tunnel that
-// does not pass traffic. Only after the data plane is verified is the proxy
-// set (and a blocked proxy edit degrades to a warning, never a teardown of a
-// working tunnel). On verification failure the core is stopped and nothing
-// host-side was mutated, so the candidate loop retries on a clean machine.
+// the system proxy is touched in CLI / strict mode. Desktop fast mode captures
+// after real HTTPS succeeds, while the remaining payload check continues; a
+// failed check restores the saved host baseline before stopping the core.
 // The optional afterReady hook runs once the core is listening but before the
 // data plane is verified: the Psiphon exit uses it to bring its sidecar up (and
 // wait for a real tunnel) so the verification below already exercises the final
@@ -1191,6 +1189,27 @@ func startAndVerify(ctx context.Context, opts options, ce cachedEndpoint, run pr
 			_ = c.Stop()
 			return clientState{}, fmt.Errorf("OpenVPN 出口认证被拒绝（%s），立即换节点", reason)
 		}
+	}
+
+	// Legacy exit overlays keep their separate sidecar / relay-speed lifecycle.
+	// The desktop UI exposes the six native WARP protocols, not these exits.
+	if opts.desktop && !opts.psiphonMode && !opts.openvpnMode {
+		state, verifyErr := verifyDesktopSession(ctx, desktopSessionState(opts, ce, run, c.PID()), opts.optimistic, desktopSessionOps{
+			verify: func(ctx context.Context, usable func(clientState) error) (clientState, error) {
+				return verifyDesktopConnection(ctx, opts, func(msg string) { stageMsg(fmt.Sprintf("[%s] %s", label, msg)) }, usable)
+			},
+			capture: func(state *clientState) error { return captureDesktopProxy(opts, label, state) },
+			persist: saveState, restore: restoreDesktopProxy, connection: desktopConnection,
+		})
+		if verifyErr != nil {
+			desktopConnection("disconnected")
+			_ = c.Stop()
+			if opts.optimistic {
+				return clientState{}, &postConnectVerificationError{verifyErr}
+			}
+			return clientState{}, fmt.Errorf("数据面验证失败: %w", verifyErr)
+		}
+		return state, nil
 	}
 
 	// mihomo listening says nothing about the tunnel: with a dead endpoint the

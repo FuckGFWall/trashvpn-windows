@@ -69,7 +69,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool IsPowerWorking => connecting || switchingModes || verifying;
     public bool IsStatusWorking => preparing || IsPowerWorking;
     public string ConnectionHeading => Status == "已连接（检测中）" ? "已连接" : Status;
-    public string SidebarStatus => preparing && !connected && !connecting ? "正在检查" : Status;
+    public string SidebarStatus => preparing && !connected && !connecting ? "正在检查" : ConnectionHeading;
     public bool CanConfigure => !resourcesInstalling && !cleanupFailed && !switchingModes && !exiting && (!busy || preparing) && !connected && settingsReadable;
     public bool CanChangeModes => !resourcesInstalling && !cleanupFailed && !busy && !switchingModes && !exiting && settingsReadable;
     public bool CanToggleFromTray => !resourcesInstalling && !busy && !connecting && !switchingModes && !exiting && settingsReadable;

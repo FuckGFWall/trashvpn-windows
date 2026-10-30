@@ -45,9 +45,10 @@ public partial class App : Application
     }
     public static void ApplyTheme(string value)
     {
-        var theme = value switch { "dark" => "Fluent.Dark.xaml", "auto" => "Fluent.xaml", _ => "Fluent.Light.xaml" };
-        Current.Resources.MergedDictionaries.Clear();
-        Current.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/PresentationFramework.Fluent;component/Themes/" + theme) });
+        // Let WPF update its own Fluent / native-frame theme state as well as
+        // the resource brushes; swapping dictionaries alone leaves two theme
+        // owners that can overwrite each other on a later dispatcher pass.
+        Current.ThemeMode = value switch { "dark" => ThemeMode.Dark, "auto" => ThemeMode.System, _ => ThemeMode.Light };
         var dark = value == "dark" || value == "auto" && (int?)Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) == 0;
         IsDarkTheme = dark;
         string[] keys = ["PageBrush", "CardBrush", "RailBrush", "LineBrush", "InkBrush", "MutedBrush", "TintBrush"];

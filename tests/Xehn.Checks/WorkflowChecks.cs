@@ -42,6 +42,7 @@ internal static class WorkflowChecks
             fake.Last.Emit("connection", state: "provisional");
             check(vm.IsConnected && vm.Status.Contains("检测中"), "fast mode exposes provisional connection");
             check(vm.ConnectionHeading == "已连接" && vm.IsPowerWorking, "provisional connection heading stays connected while the ring indicates verification");
+            check(vm.SidebarStatus == "已连接" && vm.IsStatusWorking, "provisional sidebar also says connected and retains its progress ring");
             fake.Last.Emit("connection", state: "disconnected");
             check(!vm.IsConnected, "failed background verification immediately retracts connection");
             fake.Fail(); PumpUntil(() => connect.IsCompleted);
@@ -128,7 +129,7 @@ internal static class WorkflowChecks
         check(vm.IsConnected && vm.SplitSelected, "strict hot switch displays connected after verification");
         vm.VerifyBeforeConnect = false; vm.GlobalSelected = true;
         modes.Last.Emit("connection", state: "provisional");
-        check(vm.IsConnected && vm.Status.Contains("检测中"), "fast hot switch explicitly displays connected-but-checking");
+        check(vm.IsConnected && vm.SidebarStatus == "已连接" && vm.IsStatusWorking, "fast hot switch keeps connected sidebar wording and verification animation");
         modes.Fail(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
         check(vm.SplitSelected && vm.Notice.Contains("失败"), "failed hot verification rolls mode back and surfaces failure");
         modes.Verification = "failed"; vm.RefreshAsync().GetAwaiter().GetResult();

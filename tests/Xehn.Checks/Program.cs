@@ -240,6 +240,7 @@ internal static class Program
             preview.Complete(); DashboardPreviewEngine.Wait(() => preview.Command == "desktop-connect", Layout);
             preview.Connected = true; preview.Emit("@@XEHN {\"type\":\"connection\",\"state\":\"provisional\"}"); Layout();
             Check(((TextBlock)window.FindName("ConnectionHeading")).Text == "已连接" && ring.IsActive, "actual home heading hides verification wording without stopping real verification");
+            Check(((TextBlock)connectionStatus.Children[0]).Text == "已连接" && ((ProgressRing)window.FindName("StatusProgressRing")).IsActive, "actual sidebar hides checking suffix while its verification ring stays active");
             Snapshot("home-verifying");
             preview.Emit("@@XEHN {\"type\":\"connection\",\"state\":\"verified\"}"); preview.Complete(); DashboardPreviewEngine.Wait(() => connect.IsCompleted, Layout); connect.GetAwaiter().GetResult(); Layout();
             Check(!ring.IsActive && glyph.Visibility == Visibility.Visible, "verified connection restores the unchanged white power glyph");

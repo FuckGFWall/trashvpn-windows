@@ -116,11 +116,9 @@ func applyDesktopModes(ctx context.Context, old clientState, before, after []byt
 			return err
 		}
 		if ops.connection != nil {
-			if ops.optimistic {
-				ops.connection("provisional")
-			} else {
-				ops.connection("verifying")
-			}
+			// A reload ACK cannot prove the new route works. In particular,
+			// TUN -> proxy has not installed the host proxy at this point.
+			ops.connection("verifying")
 		}
 		var probe clientState
 		if probe, err = ops.verify(ctx); err != nil {
@@ -130,6 +128,9 @@ func applyDesktopModes(ctx context.Context, old clientState, before, after []byt
 		if probe.ExitIP != "" {
 			next.ExitIP = probe.ExitIP
 		}
+	}
+	if err = ctx.Err(); err != nil {
+		return err
 	}
 	if old.TUN != tun {
 		next.ProxyWarn = ""
@@ -156,6 +157,11 @@ func applyDesktopModes(ctx context.Context, old clientState, before, after []byt
 				return err
 			}
 		}
+	}
+	if ops.verify != nil && ops.optimistic && ops.connection != nil {
+		// The HTTPS proof and actual host capture now both exist. Only
+		// persistence remains; failure still rolls back the entire switch.
+		ops.connection("provisional")
 	}
 	filesTouched = true
 	if err = ops.config(after); err != nil {

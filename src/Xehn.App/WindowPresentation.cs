@@ -80,6 +80,13 @@ public static class WindowPresentation
         var captionResult = DwmSetWindowAttribute(handle, 35, ref caption, sizeof(int));
         var textResult = DwmSetWindowAttribute(handle, 36, ref text, sizeof(int));
         SetWindowPos(handle, 0, 0, 0, 0, 0, 0x37); // FRAMECHANGED, no move/size/activate/z-order
+        // A changed DWM BOOL does not always invalidate the cached Win10
+        // non-client caption. Repaint both activation states, then restore the
+        // real one, without activating / moving / resizing the user's window.
+        var active = window.IsActive ? 1 : 0;
+        SendMessage(handle, 0x86, active == 0 ? 1 : 0, 0); // WM_NCACTIVATE
+        SendMessage(handle, 0x86, active, 0);
+        RedrawWindow(handle, 0, 0, 0x501); // INVALIDATE | UPDATENOW | FRAME
         return (modeResult == 0, captionResult == 0 && textResult == 0);
     }
 
@@ -96,4 +103,6 @@ public static class WindowPresentation
     [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong(nint window, int index, int value);
     [DllImport("user32.dll")] private static extern nint GetSystemMenu(nint window, [MarshalAs(UnmanagedType.Bool)] bool revert);
     [DllImport("user32.dll")] private static extern uint EnableMenuItem(nint menu, uint item, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool RedrawWindow(nint window, nint rect, nint region, uint flags);
 }

@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private TrayService? tray;
     private bool allowClose, exitInProgress, loaded, closed;
+    private int themeRevision;
     public MainWindow()
     {
         InitializeComponent();
@@ -43,8 +44,17 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         Closed += (_, _) => { closed = true; timer.Stop(); tray?.Dispose(); App.ThemeChanged -= UpdateTitleBar; SystemEvents.UserPreferenceChanged -= SystemThemeChanged; SystemEvents.DisplaySettingsChanged -= DisplaySettingsChanged; model.Dispose(); };
     }
-    private void UpdateTitleBar() => WindowPresentation.ApplyTitleBar(this, App.IsDarkTheme,
-        ((SolidColorBrush)FindResource("PageBrush")).Color, ((SolidColorBrush)FindResource("InkBrush")).Color);
+    private void UpdateTitleBar()
+    {
+        var revision = ++themeRevision;
+        void Apply() => WindowPresentation.ApplyTitleBar(this, App.IsDarkTheme,
+            ((SolidColorBrush)FindResource("PageBrush")).Color, ((SolidColorBrush)FindResource("InkBrush")).Color);
+        if (closed) return;
+        Apply();
+        // Fluent may finish native styling after ResourceDictionary updates.
+        // Reconcile once after that work, never replay an older theme change.
+        Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => { if (!closed && revision == themeRevision) Apply(); }));
+    }
     private void DisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.InvokeAsync(() => { if (!closed) WindowPresentation.FitToWorkArea(this, center: false, fixedWidth: 800); });
     private void SystemThemeChanged(object sender, UserPreferenceChangedEventArgs e) => Dispatcher.InvokeAsync(() => { if (closed) return; if (model.Theme == "auto") App.ApplyTheme("auto"); WindowPresentation.FitToWorkArea(this, center: false, fixedWidth: 800); });
     private void Navigate(object sender, RoutedEventArgs e)

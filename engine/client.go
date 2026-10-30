@@ -1219,13 +1219,20 @@ func measureDownBps(mixedPort, bytes int, timeout time.Duration) int64 {
 // returned bits per second cover the body transfer only (TLS setup and the
 // request are already done), which is what the speed floor compares.
 func probeThroughput(mixedPort, want int, timeout time.Duration) (int64, error) {
+	return probeThroughputContext(context.Background(), mixedPort, want, timeout)
+}
+func probeThroughputContext(ctx context.Context, mixedPort, want int, timeout time.Duration) (int64, error) {
+	transport := &http.Transport{Proxy: http.ProxyURL(mustParseURL("http://127.0.0.1:" + strconv.Itoa(mixedPort)))}
+	defer transport.CloseIdleConnections()
 	client := &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(mustParseURL("http://127.0.0.1:" + strconv.Itoa(mixedPort))),
-		},
+		Timeout:   timeout,
+		Transport: transport,
 	}
-	resp, err := client.Get(fmt.Sprintf("https://speed.cloudflare.com/__down?bytes=%d", want))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://speed.cloudflare.com/__down?bytes=%d", want), nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
