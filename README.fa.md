@@ -2,14 +2,13 @@
   <img src="src/Xehn.App/Assets/logo-readme.png" alt="نشان TrashVPN" width="128">
 </p>
 <h1 align="center">TrashVPN for Windows</h1>
-<p align="center">یک کلاینت ساده WARP برای ویندوز</p>
+<p align="center">یک کلاینت شخص ثالث WARP که روی ویندوز اجرا می‌شود</p>
 <p align="center"><a href="README.md">简体中文</a> · <a href="README.en.md">English</a> · <strong>فارسی</strong></p>
 
 ---
 
 <div dir="rtl">
 
-یک کلاینت شخص ثالث Cloudflare WARP برای ویندوز.
 
 ## امکانات
 
@@ -56,6 +55,7 @@
 ## پروژه‌های مرتبط و قدردانی
 
 - موتور انتخاب گره ارائه‌شده توسط [Xiaohe](https://github.com/hezhanleiok/xiaohe)
+- ایدهٔ انتخاب سریع گره ارائه‌شده توسط [Oblivion](https://github.com/bepass-org/oblivion)
 - [TrashVPN برای iOS](https://github.com/FuckGFWall/trashvpn-ios)
 - [اجزا و مجوزهای شخص ثالث](engine/THIRD_PARTY_NOTICES.md)
 

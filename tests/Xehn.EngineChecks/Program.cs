@@ -128,7 +128,7 @@ await warm.RunAsync("desktop-prepare", line => {
     using var doc = System.Text.Json.JsonDocument.Parse(line[7..]);
     if (doc.RootElement.GetProperty("type").GetString() == "progress") preparationEvents.Add(doc.RootElement.Clone());
 }, System.Text.Json.JsonSerializer.Serialize(new ClientSettings { Proto = "wg" }, ClientSettings.JsonOptions)).WaitAsync(TimeSpan.FromSeconds(10));
-Check(preparationEvents.Any(e => e.GetProperty("phase").GetString() == "register" && e.GetProperty("step").GetInt32() == 1 && e.GetProperty("steps").GetInt32() == 7), "real bridge reports protocol-specific major steps for cached account");
+Check(preparationEvents.Any(e => e.GetProperty("phase").GetString() == "register" && e.GetProperty("step").GetInt32() == 1 && e.GetProperty("steps").GetInt32() == 6), "real bridge reports protocol-specific major steps for cached account");
 Check(preparationEvents.Any(e => e.TryGetProperty("stage", out var stage) && stage.GetString() == "cached" && e.GetProperty("detail").GetString()!.Contains("4 个可用节点")) && preparationEvents[^1].GetProperty("done").GetDouble() == 100, "real warm-cache bridge reports actual node count and final full progress");
 Check(Directory.GetFiles(warmHome).Length == warmBefore.Count && warmBefore.All(file => File.ReadAllText(Path.Combine(warmHome, file.Key!)) == file.Value) && !Directory.Exists(Path.Combine(warmHome, "core")), "warm preparation fixture never modifies account/cache, starts a core or writes connection state");
 var warmExporter = new NodeExportService(warmHome,binary);

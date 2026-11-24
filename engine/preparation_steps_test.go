@@ -9,7 +9,7 @@ func TestPreparationStepsMatchProtocolWorkflows(t *testing.T) {
 	for _, tc := range []struct {
 		proto string
 		total int
-	}{{protoWG, 7}, {protoAWG, 7}, {protoMASQUE, 6}, {protoMASQUEH2, 6}, {protoWWarp, 14}, {protoMASQUEMASQUE, 12}} {
+	}{{protoWG, 6}, {protoAWG, 6}, {protoMASQUE, 6}, {protoMASQUEH2, 6}, {protoWWarp, 12}, {protoMASQUEMASQUE, 12}} {
 		t.Run(tc.proto, func(t *testing.T) {
 			s := defaultSettings()
 			s.Proto = tc.proto
@@ -38,18 +38,9 @@ func TestPreparationStepsMatchProtocolWorkflows(t *testing.T) {
 				if segment > 1 {
 					p.note("outer-dial", "建立外层")
 				}
-				if proto == protoWG || proto == protoAWG {
-					p.update(scanProgressMsg{stage: "ports-primary", completed: 3, total: 14, succeeded: 2})
-					first := events[len(events)-1]
-					p.update(scanProgressMsg{stage: "ports-alternate", completed: 1, total: 8, succeeded: 1})
-					alternate := events[len(events)-1]
-					if first["step"] != alternate["step"] || first["steps"] != alternate["steps"] || !strings.Contains(first["detail"].(string), "3/14 地址") || !strings.Contains(alternate["detail"].(string), "备用端口") {
-						t.Fatal("port passes are not one major step with real inner counters")
-					}
-				}
-				p.update(scanProgressMsg{stage: "verify", completed: 4, total: 14, succeeded: 2, target: 4, skipped: 10, finished: true})
+				p.update(scanProgressMsg{stage: "verify", completed: 4, total: 14, succeeded: 2, target: 4, quality: 1, skipped: 10, finished: true})
 				verify := events[len(events)-1]
-				if !strings.Contains(verify["detail"].(string), "4/14 节点 · 可用 2/4 · 跳过 10") {
+				if !strings.Contains(verify["detail"].(string), "4/14 节点 · 可用 2 · 优质 1/4 · 跳过 10") {
 					t.Fatal("actual verification counters lost")
 				}
 				p.note("rank", "排序")

@@ -557,6 +557,9 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	if outer != nil {
 		emit(stepMsg{done: true, label: "Through", summary: outer.label})
 	}
+	if opts.desktop {
+		return runDesktopSelection(ctx, opts, run, ips, timeout, emit)
+	}
 	ports := masqueEndpointPorts
 	if opts.port != 0 {
 		ports = []int{opts.port}
@@ -568,7 +571,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		emit(stepMsg{done: true, label: "Ports", summary: fmt.Sprintf("sweeping all %d known ports (phase 1 skipped)", len(warpPorts))})
 	}
 	if !run.isMASQUE() && opts.port == 0 && opts.sweepPorts != sweepAll {
-		open, err := reachablePorts(ctx, run, ips, timeout, scanPortSamples(opts), opts.tunnelParallel, emit)
+		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, opts.tunnelParallel, emit)
 		if err != nil {
 			emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
 			return phaseResult{}, err
@@ -584,7 +587,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		ports = warpPorts
 	}
 	targets := probeTargets(run, opts.sweepPorts != "", ips, ports)
-	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
+	label := verificationLabel(opts, run)
 	emit(barBeginMsg{label: label, total: len(targets)})
 	results, err := verifyTargets(ctx, opts, run, targets, emit,
 		func() (tunnel, error) { return newTunnel(run) },

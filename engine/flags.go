@@ -24,7 +24,6 @@ type options struct {
 	scanIntensity               string
 	cacheDays                   int
 	cacheNeverExpires           bool
-	portSamples                 int
 	scanBudget, candidateBudget time.Duration
 
 	tunnelParallel int

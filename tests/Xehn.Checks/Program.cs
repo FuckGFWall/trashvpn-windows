@@ -2,6 +2,8 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Xehn.App;
@@ -208,14 +210,55 @@ internal static class Program
                     window.DataContext=preferenceModel; Layout();
                     var lan=(TextBlock)window.FindName("LanProxyEndpoints"); var days=(TextBox)window.FindName("CacheDaysInput"); var dayRow=(Grid)window.FindName("CacheDaysRow");
                     Check(lan.Visibility==Visibility.Collapsed && days.IsEnabled && days.Text=="1", "LAN details start hidden and cache input starts enabled at one day");
-                    preferenceModel.AllowLan=true; preferenceModel.MixedPort=1080; Layout();
+                    preferenceModel.AllowLan=true;
+                    preferenceModel.MixedPortText="1080"; preferenceModel.CommitSettingsInput(nameof(MainViewModel.MixedPortText)); Layout();
                     Check(lan.Visibility==Visibility.Visible && lan.Text=="192.168.1.20:1080" && lan.TranslatePoint(new Point(),panel).Y>((CheckBox)window.FindName("AllowLanSetting")).TranslatePoint(new Point(),panel).Y, "actual LAN address and mixed-port row appears directly below its switch");
                     preferenceModel.CacheNeverExpires=true; Layout();
                     Check(!dayRow.IsEnabled && !days.IsEnabled && dayRow.Opacity==.4 && days.Text=="1", "never-expire switch greys the entire day row without clearing the saved value");
                     scroller.ScrollToBottom(); Layout(); Snapshot("settings-lan-cache-never");
                     preferenceModel.CacheNeverExpires=false; preferenceModel.AllowLan=false; Layout();
                     Check(days.IsEnabled && lan.Visibility==Visibility.Collapsed && lan.Text=="", "finite-cache and LAN toggles restore input and remove hidden address content");
-                    preferenceModel.CacheDays=14; Layout(); Snapshot("settings-cache-days");
+                    var keyboard = Keyboard.PrimaryDevice;
+                    var source = HwndSource.FromHwnd(new WindowInteropHelper(window).EnsureHandle());
+                    bool PressEnter(TextBox input)
+                    {
+                        var e = new KeyEventArgs(keyboard, source, Environment.TickCount, Key.Enter) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+                        input.RaiseEvent(e);
+                        return e.Handled;
+                    }
+                    days.SetCurrentValue(TextBox.TextProperty, "14");
+                    preferenceModel.RefreshAsync().GetAwaiter().GetResult();
+                    Layout();
+                    Check(days.Text == "14" && ClientSettings.Load(preferenceModel.Home).CacheDays == 1, "typing only updates the cache lifetime draft, even across a status refresh");
+                    Check(PressEnter(days), "cache lifetime input handles Enter in place");
+                    Layout();
+                    Check(days.Text == "14" && ClientSettings.Load(preferenceModel.Home).CacheDays == 14, "Enter persists the custom cache lifetime instead of reverting");
+                    Snapshot("settings-cache-days");
+                    days.SetCurrentValue(TextBox.TextProperty, "36501"); PressEnter(days); Layout();
+                    Check(days.Text == "36501" && ClientSettings.Load(preferenceModel.Home).CacheDays == 14 && preferenceModel.Notice == ClientSettings.InvalidCacheDays, "an out-of-range edit stays available for correction without overwriting the last valid setting");
+                    days.SetCurrentValue(TextBox.TextProperty, " 21 ");
+                    days.RaiseEvent(new KeyboardFocusChangedEventArgs(keyboard, Environment.TickCount, days, nav) { RoutedEvent = Keyboard.LostKeyboardFocusEvent });
+                    Layout();
+                    Check(days.Text == "21" && ClientSettings.Load(preferenceModel.Home).CacheDays == 21 && preferenceModel.Notice == "", "leaving the field saves valid input and clears its error");
+                    foreach (var (input, draft, saved) in new (string, string, Func<ClientSettings, bool>)[]
+                    {
+                        ("TimeoutInput", "5", s => s.TimeoutSec == 5),
+                        ("MixedPortInput", "9090", s => s.MixedPort == 9090 && s.ApiPort != 9090),
+                        ("MtuInput", "1280", s => s.Mtu == 1280),
+                        ("CustomDnsInput", "1.0.0.1, 8.8.8.8", s => s.DnsCustom == "1.0.0.1, 8.8.8.8"),
+                    })
+                    {
+                        var editor = (TextBox)window.FindName(input);
+                        editor.SetCurrentValue(TextBox.TextProperty, draft);
+                        Check(!saved(ClientSettings.Load(preferenceModel.Home)), $"{input} keeps uncommitted edits out of settings");
+                        var handled = PressEnter(editor); Layout();
+                        Check(handled && editor.Text == draft && saved(ClientSettings.Load(preferenceModel.Home)), $"{input} persists its edited value on Enter");
+                    }
+                    var portInput = (TextBox)window.FindName("MixedPortInput");
+                    portInput.SetCurrentValue(TextBox.TextProperty, "99999"); PressEnter(portInput); Layout();
+                    Check(preferenceModel.Notice == ClientSettings.InvalidPort && ClientSettings.Load(preferenceModel.Home).MixedPort == 9090, "invalid port is not applied");
+                    days.SetCurrentValue(TextBox.TextProperty, "9"); PressEnter(days); Layout();
+                    Check(ClientSettings.Load(preferenceModel.Home).CacheDays == 9, "an invalid draft in another field does not block saving a valid input");
                 }
                 window.DataContext=vm; scroller.ScrollToTop(); Layout();
                 App.ApplyTheme("dark"); Snapshot("settings-dark");

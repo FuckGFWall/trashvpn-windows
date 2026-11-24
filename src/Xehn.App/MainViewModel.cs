@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
@@ -152,17 +153,82 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
     public string Family { get => settings.IpFamily; set { if (value != null && value != settings.IpFamily) { settings.IpFamily = value; if (Save() && initialized) StartPreparation(); } } }
-    public int MixedPort { get => settings.MixedPort; set { settings.MixedPort = value; if (settings.ApiPort == value) settings.ApiPort = value == 9090 ? 9091 : 9090; UpdateLanEndpoints(); Save(); } }
-    public int Mtu { get => settings.Mtu; set { settings.Mtu = value; Save(); } }
-    public int Timeout { get => settings.TimeoutSec; set { settings.TimeoutSec = value; Save(); } }
-    public string Dns { get => settings.DnsCustom; set { settings.DnsCustom = value; Save(); } }
     public bool AllowLan { get => settings.AllowLan; set { settings.AllowLan = value; UpdateLanEndpoints(); Save(); } }
     public bool DnsLeak { get => settings.DnsLeak; set { settings.DnsLeak = value; Save(); } }
     public bool DnsOff { get => settings.DnsOff; set { settings.DnsOff = value; Save(); } }
     public bool AutoConnectAfterPrepare { get => settings.AutoConnectAfterPrepare; set { settings.AutoConnectAfterPrepare = value; Save(); } }
     public bool CacheNeverExpires { get => settings.CacheNeverExpires; set { if (value == settings.CacheNeverExpires) return; settings.CacheNeverExpires = value; Changed(nameof(CanEditCacheDays)); if (Save() && initialized) StartPreparation(); } }
-    public int CacheDays { get => settings.CacheDays; set { if (value == settings.CacheDays) return; settings.CacheDays = value; if (Save() && initialized && !settings.CacheNeverExpires) StartPreparation(); } }
+    public int CacheDays => settings.CacheDays;
     public bool CanEditCacheDays => !CacheNeverExpires;
+    // Drafts update as the user types. A status or preparation refresh may
+    // rebind the fields, but should not reload the saved value mid-edit.
+    public string CacheDaysText { get; set; }
+    public string TimeoutText { get; set; }
+    public string MixedPortText { get; set; }
+    public string MtuText { get; set; }
+    public string DnsText { get; set; }
+    internal void CommitSettingsInput(string property)
+    {
+        if (!CanConfigure) return;
+        switch (property)
+        {
+            case nameof(CacheDaysText) when CanEditCacheDays:
+                CacheDaysText = CommitNumber(CacheDaysText, settings.CacheDays, value => settings.CacheDays = value,
+                    ClientSettings.InvalidCacheDays, property, out var daysChanged);
+                Changed(property);
+                if (daysChanged && initialized) StartPreparation();
+                break;
+            case nameof(TimeoutText):
+                TimeoutText = CommitNumber(TimeoutText, settings.TimeoutSec, value => settings.TimeoutSec = value,
+                    ClientSettings.InvalidTimeout, property, out _);
+                Changed(property);
+                break;
+            case nameof(MixedPortText):
+                MixedPortText = CommitNumber(MixedPortText, settings.MixedPort, value => settings.MixedPort = value,
+                    ClientSettings.InvalidPort, property, out var portChanged);
+                Changed(property);
+                if (portChanged) UpdateLanEndpoints();
+                break;
+            case nameof(MtuText):
+                MtuText = CommitNumber(MtuText, settings.Mtu, value => settings.Mtu = value,
+                    ClientSettings.InvalidMtu, property, out _);
+                Changed(property);
+                break;
+            case nameof(DnsText) when DnsText != settings.DnsCustom:
+                var previous = settings.DnsCustom;
+                settings.DnsCustom = DnsText;
+                if (!Save(property)) settings.DnsCustom = previous;
+                break;
+        }
+    }
+
+    private static string NumberText(int value) => value.ToString(CultureInfo.InvariantCulture);
+    private string CommitNumber(string draft, int previous, Action<int> set, string error, string property, out bool changed)
+    {
+        changed = false;
+        if (!int.TryParse(draft, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        {
+            Notice = error;
+            return draft;
+        }
+        if (value == previous)
+        {
+            if (Notice == error) Notice = "";
+            return NumberText(value);
+        }
+        var previousApiPort = settings.ApiPort;
+        set(value);
+        if (property == nameof(MixedPortText) && settings.ApiPort == value)
+            settings.ApiPort = value == 9090 ? 9091 : 9090;
+        if (!Save(property))
+        {
+            set(previous);
+            settings.ApiPort = previousApiPort;
+            return draft;
+        }
+        changed = true;
+        return NumberText(value);
+    }
     public bool CloseToTray { get => settings.CloseToTray; set { settings.CloseToTray = value; Save(); } }
     public bool AutoStart
     {
@@ -201,6 +267,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         try { settings = ClientSettings.Load(Home); }
         catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
         { settings = new(); settingsReadable = false; Notice = "无法读取设置，已禁止连接以保护原文件：" + e.Message; }
+        CacheDaysText = NumberText(settings.CacheDays);
+        TimeoutText = NumberText(settings.TimeoutSec);
+        MixedPortText = NumberText(settings.MixedPort);
+        MtuText = NumberText(settings.Mtu);
+        DnsText = settings.DnsCustom;
         try { settings.AutoStart = desktop.AutoStartEnabled; }
         catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException) { Notice = "无法读取开机自启动状态：" + e.Message; }
         App.ApplyTheme(settings.Theme);

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using System.Windows.Navigation;
 using System.Windows.Media;
@@ -101,6 +102,19 @@ public partial class MainWindow : Window
     private async void ToggleConnection(object sender, RoutedEventArgs e) => await model.ToggleAsync();
     private async void TogglePreparation(object sender, RoutedEventArgs e) => await model.TogglePreparationAsync();
     private void RestartPreparation(object sender, RoutedEventArgs e) => model.RestartPreparation();
+    private void SettingsInputKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        CommitSettingsInput((TextBox)sender);
+        e.Handled = true;
+    }
+    private void SettingsInputLostFocus(object sender, KeyboardFocusChangedEventArgs e) => CommitSettingsInput((TextBox)sender);
+    private static void CommitSettingsInput(TextBox box)
+    {
+        if (box.DataContext is MainViewModel settingsModel &&
+            box.GetBindingExpression(TextBox.TextProperty)?.ParentBinding.Path?.Path is { } property)
+            settingsModel.CommitSettingsInput(property);
+    }
     private async void CopyNodeConfig(object sender, RoutedEventArgs e) => await model.NodeExport.CopyAsync();
     private void CaptureModeRequested(object sender, ModeSelectionEventArgs e) { if (e.Second) model.TunSelected = true; else model.ProxySelected = true; }
     private void RoutingModeRequested(object sender, ModeSelectionEventArgs e) { if (e.Second) model.SplitSelected = true; else model.GlobalSelected = true; }

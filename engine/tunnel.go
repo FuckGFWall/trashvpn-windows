@@ -33,7 +33,11 @@ func newIPStack(local []netip.Addr, mtu int) (tun.Device, *ipStack, error) {
 	transport := &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return tnet.DialContext(ctx, "tcp", metaDialAddr())
+			addr, _ := ctx.Value(selectionAddrKey{}).(string)
+			if addr == "" {
+				addr = metaDialAddr()
+			}
+			return tnet.DialContext(ctx, "tcp", addr)
 		},
 	}
 	return tunDev, &ipStack{tnet: tnet, client: &http.Client{Transport: transport}}, nil
@@ -213,6 +217,36 @@ func (s *ipStack) durability(ctx context.Context, count int, timeout time.Durati
 		return rtt2, loss2, false
 	}
 	return rtt, loss, true
+}
+
+type selectionAddrKey struct{}
+
+// A small DNS exchange inside this particular tunnel proves the data plane
+// before TLS. Pass that answer directly to the dialer (no host resolver,
+// proxy, second DNS lookup or new tunnel). Keep DNS/HTTPS budgets independent.
+func (s *ipStack) selectionMeta(ctx context.Context, timeout time.Duration) (metaResult, bool) {
+	probeStep(ctx, "隧道 DNS")
+	dnsCtx, done := context.WithTimeout(ctx, timeout)
+	ips, err := lookupTunnelHost(dnsCtx, s.tnet, metaHost)
+	done()
+	if err != nil || len(ips) == 0 || ctx.Err() != nil {
+		return metaResult{}, false
+	}
+	addr := net.JoinHostPort(preferV4(ips), "443")
+	reqCtx, cancel := context.WithTimeout(context.WithValue(ctx, selectionAddrKey{}, addr), timeout)
+	defer cancel()
+	probeStep(ctx, "出口 HTTPS")
+	body, ok := fetchMeta(reqCtx, s.client, metaURL)
+	if !ok {
+		return metaResult{}, false
+	}
+	return verifiedMeta(body)
+}
+
+func verifiedMeta(body string) (metaResult, bool) {
+	m := parseMeta(body)
+	ip, err := netip.ParseAddr(m.ip)
+	return m, err == nil && ip.IsGlobalUnicast() && !ip.Unmap().IsPrivate()
 }
 
 func (s *ipStack) fetch(ctx context.Context, timeout time.Duration) (string, bool) {

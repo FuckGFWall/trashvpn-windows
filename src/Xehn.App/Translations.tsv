@@ -257,3 +257,9 @@ GeoFiles 缺失或不完整，请在关于页下载；连接中只暂存，断�
 数据目录已存在且不属于此安装，未修改原有文件。	The existing data directory does not belong to this installation. It was not changed.	پوشهٔ دادهٔ موجود متعلق به این نصب نیست و تغییر نکرد.
 数据目录不能是符号链接或目录联接。	The data directory must not be a symbolic link or junction.	پوشهٔ داده نباید پیوند نمادین یا اتصال پوشه باشد.
 无法定位本地应用数据目录。	Could not locate the local application data directory.	پوشهٔ محلی داده‌های برنامه یافت نشد.
+优质 	quality:\s	باکیفیت:\s
+握手	Handshake	دست‌دهی
+隧道 DNS	Tunnel DNS	DNS تونل
+出口 HTTPS	Tunnel HTTPS	HTTPS تونل
+稳定性	Stability	پایداری
+稳定性复测	Stability recheck	بازآزمایی پایداری

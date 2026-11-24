@@ -96,6 +96,9 @@ func TestCachePolicySettingsDefaultsAndMapping(t *testing.T) {
 	if ttl := scanCacheOptions(desktopConnectOptions(s)).ScanTTL; ttl == nil || *ttl != 24*time.Hour {
 		t.Fatal("default scan expiry is not 24 hours")
 	}
+	if ttl := scanCacheOptions(options{}).TTL; ttl != 24*time.Hour {
+		t.Fatal("default lifetime for new CLI scan entries is not 24 hours")
+	}
 	s.CacheDays = 14
 	s.CacheNeverExpires = true
 	s.AutoConnectAfterPrepare = true

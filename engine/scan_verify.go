@@ -11,10 +11,10 @@ import (
 // Counters describe settled outcomes, not merely dequeued jobs. In-flight and
 // undispatched jobs canceled after the target is met are skipped, not failures.
 type scanProgressMsg struct {
-	stage, detail                                string
-	completed, succeeded, skipped, total, target int
-	finished                                     bool
-	budgetReached                                bool
+	stage, detail                                         string
+	completed, succeeded, skipped, total, target, quality int
+	finished                                              bool
+	budgetReached                                         bool
 }
 
 type probeStepKey struct{}
@@ -67,7 +67,8 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 	}
 	results := make([]endpointResult, len(targets))
 	var mu sync.Mutex
-	completed, succeeded := 0, 0
+	completed, succeeded, quality := 0, 0, 0
+	profile := selectionFor(opts.scanIntensity)
 	active := make(map[int]string)
 	report := func(finished bool) {
 		counts := make(map[string]int)
@@ -85,7 +86,7 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 			skipped = len(targets) - completed
 		}
 		emit(scanProgressMsg{stage: "verify", detail: strings.Join(steps, " / "), completed: completed,
-			succeeded: succeeded, skipped: skipped, total: len(targets), target: opts.earlyStop, finished: finished,
+			succeeded: succeeded, quality: quality, skipped: skipped, total: len(targets), target: opts.earlyStop, finished: finished,
 			budgetReached: finished && ctx.Err() == context.DeadlineExceeded && parent.Err() == nil})
 	}
 	mu.Lock()
@@ -124,6 +125,9 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 		}
 		if usable {
 			succeeded++
+			if !opts.desktop || r.measured && r.tunPing > 0 && r.tunPing <= profile.goodRTT && r.loss <= profile.goodLoss {
+				quality++
+			}
 		}
 		if r.ok {
 			found := foundMsg{endpoint: r.endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, torn: !r.durable}
@@ -134,7 +138,7 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 		}
 		// The lock makes acceptance and cancellation atomic: racing successes
 		// cannot exceed the requested target or be mistaken for skipped jobs.
-		if opts.earlyStop > 0 && succeeded >= opts.earlyStop {
+		if opts.earlyStop > 0 && quality >= opts.earlyStop {
 			cancel()
 		}
 		emit(probedMsg{})
@@ -144,7 +148,7 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 	mu.Lock()
 	report(true)
 	mu.Unlock()
-	emit(barEndMsg{label: fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name),
+	emit(barEndMsg{label: verificationLabel(opts, run),
 		summary: fmt.Sprintf("completed %d/%d, usable %d, skipped %d", completed, len(targets), succeeded, len(targets)-completed)})
 	if parent.Err() != nil {
 		return nil, parent.Err()
@@ -156,7 +160,7 @@ func verifyTargets(parent context.Context, opts options, run protoRun, targets [
 		emit(stepMsg{done: true, label: "Scan budget", summary: fmt.Sprintf("reached %s; retaining %d verified endpoint(s)", opts.scanBudget, succeeded)})
 		return results, nil
 	}
-	if err != nil && !(ctx.Err() != nil && opts.earlyStop > 0 && succeeded >= opts.earlyStop) {
+	if err != nil && !(ctx.Err() != nil && opts.earlyStop > 0 && quality >= opts.earlyStop) {
 		return nil, err
 	}
 	return results, nil

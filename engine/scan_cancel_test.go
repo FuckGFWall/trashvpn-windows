@@ -43,19 +43,17 @@ func fixtureTargets(n int) []probeTarget {
 	return out
 }
 
-func TestScanStrengthControlsBothPhases(t *testing.T) {
+func TestSelectionProfiles(t *testing.T) {
+	var previous selectionProfile
 	for i, level := range []string{"low", "medium", "high"} {
-		o := options{}
-		applyScanIntensity(&o, level)
-		if scanPortSamples(o) != []int{4, 8, 12}[i] || o.earlyStop != []int{2, 4, 8}[i] {
-			t.Fatalf("wrong %s budgets: %+v", level, o)
+		p := selectionFor(level)
+		o := desktopConnectOptions(clientSettings{ScanIntensity: level})
+		if o.earlyStop != []int{2, 4, 8}[i] || o.tunPingCount < minDurabilityPings || o.tunPingCount <= previous.echoes ||
+			p.limit <= previous.limit || o.tunnelParallel <= previous.workers || o.scanBudget <= previous.budget || o.candidateBudget <= 0 || o.candidateBudget >= o.scanBudget ||
+			i > 0 && (p.goodLoss >= previous.goodLoss || p.goodRTT >= previous.goodRTT) {
+			t.Fatalf("invalid %s profile: %+v", level, p)
 		}
-		if o.scanBudget != []time.Duration{25 * time.Second, 45 * time.Second, 75 * time.Second}[i] || o.candidateBudget <= 0 {
-			t.Fatalf("unbounded %s scan: %+v", level, o)
-		}
-	}
-	if scanPortSamples(options{}) != portProbeSample {
-		t.Fatal("CLI default changed")
+		previous = p
 	}
 }
 
@@ -257,9 +255,6 @@ func TestScanProgressIsMonotonicAcrossPhasesAndNestedCaches(t *testing.T) {
 		var events []map[string]any
 		p := &scanProgressTracker{chain: chain, send: func(e map[string]any) { events = append(events, e) }}
 		p.begin(protoWG)
-		p.update(scanProgressMsg{stage: "ports-primary", completed: 4, total: 4, finished: true})
-		p.update(scanProgressMsg{stage: "ports-alternate", total: 4})
-		p.update(scanProgressMsg{stage: "ports-alternate", completed: 4, total: 4, finished: true})
 		p.update(scanProgressMsg{stage: "verify", completed: 2, succeeded: 2, skipped: 12, total: 14, target: 2, finished: true})
 		p.note("rank", "排序")
 		p.note("cache-write", "保存缓存")

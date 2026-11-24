@@ -212,7 +212,7 @@ func runConnectCmd(ctx context.Context, opts options) error {
 		if opts.through == "" {
 			stageMsg(fmt.Sprintf("[%s] 选择外层端点…", label))
 			if _, ok := cachedScanFor(opts.outerProto, opts.ipv6, opts); !ok {
-				stageMsg(fmt.Sprintf("[%s] 外层端点无缓存，先扫描外层（约 1-2 分钟）…", label))
+				stageMsg(fmt.Sprintf("[%s] 外层端点无缓存，先优选外层…", label))
 			}
 			endpoint, err := pickOuterEndpoint(ctx, opts)
 			if err != nil {
@@ -427,7 +427,7 @@ func runConnectCmd(ctx context.Context, opts options) error {
 	// Every cached candidate failed: the cache is stale as a whole, not just
 	// one endpoint. A fresh scan heals it for this connect and every later one.
 	if opts.pick == "" && !opts.scanNow && !scanned {
-		stageMsg(fmt.Sprintf("[%s] 缓存端点全部失活，重新扫描端点，约 1-2 分钟…", label))
+		stageMsg(fmt.Sprintf("[%s] 缓存端点全部失活，重新优选端点…", label))
 		opts.scanNow = true
 		// A chain pins its outer endpoint once, so when every inner candidate
 		// died the outer itself is the suspect. Drop an auto-picked outer so

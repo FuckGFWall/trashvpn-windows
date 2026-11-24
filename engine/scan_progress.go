@@ -27,19 +27,15 @@ type preparationStep struct {
 	stage, name string
 }
 
-// Alternate ports are a second pass of initial screening, not another major
-// step. MASQUE has no WireGuard port screening. A chain has two real scans.
+// A chain has a separate verification pipeline and cache for each layer.
 func newScanProgressTracker(s clientSettings, send func(map[string]any)) *scanProgressTracker {
 	p := &scanProgressTracker{chain: protoChained(s.Proto), send: send,
 		plan: []preparationStep{{0, "register", "注册账号"}}}
-	protocols := []string{s.Proto}
-	if s.Proto == protoWWarp {
-		protocols = []string{s.OuterProto, s.InnerProto}
+	layers := 1
+	if p.chain {
+		layers = 2
 	}
-	if s.Proto == protoMASQUEMASQUE {
-		protocols = []string{protoMASQUE, protoMASQUE}
-	}
-	for i, proto := range protocols {
+	for i := range layers {
 		prefix := ""
 		if p.chain {
 			if i == 0 {
@@ -54,9 +50,6 @@ func newScanProgressTracker(s clientSettings, send func(map[string]any)) *scanPr
 		if i > 0 {
 			add("outer-dial", "建立外层隧道")
 		}
-		if proto == protoWG || proto == protoAWG {
-			add("ports-primary", "初次筛选")
-		}
 		add("verify", "验证隧道")
 		add("rank", "整理节点")
 		add("cache-write", "保存缓存")
@@ -65,9 +58,6 @@ func newScanProgressTracker(s clientSettings, send func(map[string]any)) *scanPr
 }
 
 func (p *scanProgressTracker) describe(e map[string]any, stage, detail string) {
-	if stage == "ports-alternate" {
-		stage = "ports-primary"
-	}
 	if stage == "cached" {
 		stage = "cache-check"
 	}
@@ -101,7 +91,7 @@ func (p *scanProgressTracker) publish(fraction float64, text string) {
 	p.text = text
 	e := map[string]any{"type": "progress", "phase": "scan", "text": text,
 		"done": p.percent, "total": 100, "stage": p.last.stage,
-		"completed": p.last.completed, "succeeded": p.last.succeeded, "skipped": p.last.skipped,
+		"completed": p.last.completed, "succeeded": p.last.succeeded, "quality": p.last.quality, "skipped": p.last.skipped,
 		"candidates": p.last.total, "target": p.last.target}
 	detail := text
 	switch p.last.stage {
@@ -117,15 +107,13 @@ func (p *scanProgressTracker) publish(fraction float64, text string) {
 		detail = "写入本地优选缓存"
 	case "cached":
 		detail = fmt.Sprintf("命中 %d 个可用节点", p.last.succeeded)
-	case "ports-primary", "ports-alternate":
-		detail = fmt.Sprintf("%d/%d 地址 · %d 可用端口", p.last.completed, p.last.total, p.last.succeeded)
-		if p.last.stage == "ports-alternate" {
-			detail = "备用端口 · " + detail
-		}
 	case "verify":
 		detail = fmt.Sprintf("%d/%d 节点 · 可用 %d", p.last.completed, p.last.total, p.last.succeeded)
 		if p.last.target > 0 {
-			detail += fmt.Sprintf("/%d", p.last.target)
+			detail += fmt.Sprintf(" · 优质 %d/%d", p.last.quality, p.last.target)
+		}
+		if !p.last.finished && p.last.detail != "" {
+			detail += " · " + p.last.detail
 		}
 		if p.last.skipped > 0 {
 			detail += fmt.Sprintf(" · 跳过 %d", p.last.skipped)
@@ -167,23 +155,20 @@ func (p *scanProgressTracker) update(m scanProgressMsg) {
 	if m.total > 0 {
 		ratio = float64(m.completed) / float64(m.total)
 	}
+	if m.target > 0 {
+		ratio = math.Max(ratio, float64(m.quality)/float64(m.target))
+	}
 	if m.finished {
 		ratio = 1
 	}
 	var fraction float64
 	var text string
 	switch m.stage {
-	case "ports-primary":
-		fraction = ratio * .15
-		text = fmt.Sprintf("探测常用端口 · 完成 %d/%d 地址 · 可用 %d 端口", m.completed, m.total, m.succeeded)
-	case "ports-alternate":
-		fraction = .15 + ratio*.15
-		text = fmt.Sprintf("补充探测备用端口 · 完成 %d/%d 地址 · 可用 %d 端口", m.completed, m.total, m.succeeded)
 	case "verify":
-		fraction = .30 + ratio*.65
+		fraction = ratio * .95
 		text = fmt.Sprintf("验证隧道 · 完成 %d/%d · 可用 %d", m.completed, m.total, m.succeeded)
 		if m.target > 0 {
-			text += fmt.Sprintf("/%d", m.target)
+			text += fmt.Sprintf(" · 优质 %d/%d", m.quality, m.target)
 		}
 		text += fmt.Sprintf(" · 跳过 %d", m.skipped)
 		if m.budgetReached {

@@ -1,4 +1,12 @@
 <Window x:Class="Xehn.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Xehn.App" Title="XEHN" Icon="{x:Static local:Branding.Image}" Width="800" Height="680" MinWidth="800" MaxWidth="800" MinHeight="680" MaxHeight="680" ResizeMode="CanMinimize" WindowStartupLocation="CenterScreen" Background="{DynamicResource PageBrush}" FontFamily="Segoe UI, Microsoft YaHei UI" FontSize="14">
+ <Window.Resources>
+  <Style x:Key="SettingsInput" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+   <Setter Property="FlowDirection" Value="LeftToRight"/>
+   <Setter Property="HorizontalAlignment" Value="Right"/>
+   <EventSetter Event="PreviewKeyDown" Handler="SettingsInputKeyDown"/>
+   <EventSetter Event="LostKeyboardFocus" Handler="SettingsInputLostFocus"/>
+  </Style>
+ </Window.Resources>
  <Grid Background="{DynamicResource PageBrush}">
   <Grid.ColumnDefinitions><ColumnDefinition Width="116"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
   <Border x:Name="Sidebar" Background="{DynamicResource NavigationPaneBrush}">
@@ -93,19 +101,19 @@
         <CheckBox Content="{local:Loc 连接前检查节点可用性}" IsChecked="{Binding VerifyBeforeConnect}" Margin="0,10,0,0" ToolTip="{local:Loc 关闭：真实 HTTPS 连通并接管流量后显示已连接，后台继续载荷验证；失败会恢复代理并断开。开启：全部验证通过后再显示已连接。}"/>
         <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc 优选强度}" VerticalAlignment="Center"/><local:ScanIntensitySlider x:Name="ScanIntensityPicker" Intensity="{Binding ScanIntensity}" HorizontalAlignment="Right"/></Grid>
         <CheckBox x:Name="CacheNeverExpiresSetting" Content="{local:Loc 缓存永不过期}" IsChecked="{Binding CacheNeverExpires}" Margin="0,10,0,0"/>
-        <Grid x:Name="CacheDaysRow" IsEnabled="{Binding CanEditCacheDays}"><Grid.Style><Style TargetType="Grid" BasedOn="{StaticResource SettingRow}"><Style.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></Style.Triggers></Style></Grid.Style><TextBlock Text="{local:Loc 缓存有效期（天）}" VerticalAlignment="Center"/><TextBox FlowDirection="LeftToRight" x:Name="CacheDaysInput" Text="{Binding CacheDays}" HorizontalAlignment="Right"/></Grid>
-        <Grid Style="{StaticResource SettingRow}" Margin="0,8,0,0"><TextBlock Text="{local:Loc 探测超时（秒）}" VerticalAlignment="Center"/><TextBox FlowDirection="LeftToRight" Text="{Binding Timeout}" HorizontalAlignment="Right"/></Grid>
+        <Grid x:Name="CacheDaysRow" IsEnabled="{Binding CanEditCacheDays}"><Grid.Style><Style TargetType="Grid" BasedOn="{StaticResource SettingRow}"><Style.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></Style.Triggers></Style></Grid.Style><TextBlock Text="{local:Loc 缓存有效期（天）}" VerticalAlignment="Center"/><TextBox x:Name="CacheDaysInput" Style="{StaticResource SettingsInput}" Text="{Binding CacheDaysText, UpdateSourceTrigger=PropertyChanged}"/></Grid>
+        <Grid Style="{StaticResource SettingRow}" Margin="0,8,0,0"><TextBlock Text="{local:Loc 探测超时（秒）}" VerticalAlignment="Center"/><TextBox x:Name="TimeoutInput" Style="{StaticResource SettingsInput}" Text="{Binding TimeoutText, UpdateSourceTrigger=PropertyChanged}"/></Grid>
        </StackPanel></Border>
       <Border Style="{StaticResource SettingsCard}" Margin="0,10,0,0"><StackPanel><TextBlock Text="{local:Loc 启动与窗口}" Style="{StaticResource SectionTitle}"/><CheckBox x:Name="CloseToTraySetting" Content="{local:Loc 关闭窗口后，在托盘继续运行}" IsChecked="{Binding CloseToTray}"/><CheckBox x:Name="AutoStartSetting" Content="{local:Loc 开机自启动}" IsChecked="{Binding AutoStart}" Margin="0,10,0,0"/></StackPanel></Border>
       <Border Style="{StaticResource SettingsCard}" Margin="0,10,0,0" IsEnabled="{Binding CanConfigure}"><StackPanel><TextBlock Text="{local:Loc 网络}" Style="{StaticResource SectionTitle}"/>
-       <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc 本地代理端口}" VerticalAlignment="Center"/><TextBox FlowDirection="LeftToRight" Text="{Binding MixedPort}" HorizontalAlignment="Right"/></Grid>
+       <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc 本地代理端口}" VerticalAlignment="Center"/><TextBox x:Name="MixedPortInput" Style="{StaticResource SettingsInput}" Text="{Binding MixedPortText, UpdateSourceTrigger=PropertyChanged}"/></Grid>
        <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc 地址族}" VerticalAlignment="Center"/><local:ContentComboBox HorizontalAlignment="Right" SelectedValue="{Binding Family}" SelectedValuePath="Tag"><ComboBoxItem Content="IPv4" Tag="v4"/><ComboBoxItem Content="IPv6" Tag="v6"/><ComboBoxItem Content="{local:Loc 双栈}" Tag="both"/></local:ContentComboBox></Grid>
-       <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc MTU（0 为自动）}" VerticalAlignment="Center"/><TextBox FlowDirection="LeftToRight" Text="{Binding Mtu}" HorizontalAlignment="Right"/></Grid>
+       <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc MTU（0 为自动）}" VerticalAlignment="Center"/><TextBox x:Name="MtuInput" Style="{StaticResource SettingsInput}" Text="{Binding MtuText, UpdateSourceTrigger=PropertyChanged}"/></Grid>
        <CheckBox x:Name="AllowLanSetting" Content="{local:Loc 允许局域网访问}" IsChecked="{Binding AllowLan}" Margin="0,8,0,0"/>
        <TextBlock x:Name="LanProxyEndpoints" Text="{local:Localize LanProxyEndpoints}" Visibility="{Binding AllowLan, Converter={StaticResource BoolVisibility}}" FontSize="12" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
       </StackPanel></Border>
        <Border Style="{StaticResource SettingsCard}" Margin="0,10,0,0" IsEnabled="{Binding CanConfigure}"><StackPanel><TextBlock Text="DNS" Style="{StaticResource SectionTitle}"/>
-        <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc 自定义 DNS}" VerticalAlignment="Center"/><TextBox FlowDirection="LeftToRight" x:Name="CustomDnsInput" Text="{Binding Dns}" HorizontalAlignment="Right" ToolTip="{local:Loc 多个解析器使用逗号分隔}"/></Grid>
+        <Grid Style="{StaticResource SettingRow}"><TextBlock Text="{local:Loc 自定义 DNS}" VerticalAlignment="Center"/><TextBox x:Name="CustomDnsInput" Style="{StaticResource SettingsInput}" Text="{Binding DnsText, UpdateSourceTrigger=PropertyChanged}" ToolTip="{local:Loc 多个解析器使用逗号分隔}"/></Grid>
         <TextBlock x:Name="DefaultDnsHint" Text="{local:Loc 留空则使用默认 DNS 1.1.1.1}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,10"/>
         <CheckBox Content="{local:Loc DNS 防泄漏}" IsChecked="{Binding DnsLeak}"/><CheckBox Content="{local:Loc 不向隧道下发 DNS}" IsChecked="{Binding DnsOff}" Margin="0,10,0,0"/>
        </StackPanel></Border>

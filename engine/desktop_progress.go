@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
 )
 
 var desktopEvents bool
@@ -36,21 +35,12 @@ func desktopEvent(e any) {
 // Same ranking, different finite sampling budgets. Stop once enough durable
 // candidates exist instead of sweeping the entire pool for a single connection.
 func applyScanIntensity(o *options, level string) {
-	switch level {
-	case "low":
-		o.perSubnet, o.earlyStop = 1, 2
-		o.portSamples = 4
-		o.scanBudget, o.candidateBudget = 25*time.Second, 10*time.Second
-	case "high":
-		o.perSubnet, o.earlyStop = 8, 8
-		o.portSamples = 12
-		o.scanBudget, o.candidateBudget = 75*time.Second, 15*time.Second
-	default:
+	if level != "low" && level != "high" {
 		level = "medium"
-		o.perSubnet, o.earlyStop = 3, 4
-		o.portSamples = 8
-		o.scanBudget, o.candidateBudget = 45*time.Second, 12*time.Second
 	}
+	p := selectionFor(level)
+	o.perSubnet, o.tunnelParallel, o.earlyStop, o.tunPingCount = p.samples, p.workers, p.goal, p.echoes
+	o.scanBudget, o.candidateBudget = p.budget, p.candidate
 	o.scanIntensity = level
 }
 

@@ -2,12 +2,10 @@
   <img src="src/Xehn.App/Assets/logo-readme.png" alt="TrashVPN icon" width="128">
 </p>
 <h1 align="center">TrashVPN for Windows</h1>
-<p align="center">A simple WARP client for Windows</p>
+<p align="center">A third-party WARP client that runs on Windows</p>
 <p align="center"><a href="README.md">简体中文</a> · <strong>English</strong> · <a href="README.fa.md">فارسی</a></p>
 
 ---
-
-A third-party Cloudflare WARP client for Windows.
 
 ## Features
 
@@ -50,5 +48,6 @@ The output is in `artifacts\app`. Exit any client running from that directory be
 ## Related projects and credits
 
 - The node selection engine provided by [Xiaohe](https://github.com/hezhanleiok/xiaohe)
+- The fast node selection approach provided by [Oblivion](https://github.com/bepass-org/oblivion)
 - [TrashVPN for iOS](https://github.com/FuckGFWall/trashvpn-ios)
 - [Third-party components and licenses](engine/THIRD_PARTY_NOTICES.md)

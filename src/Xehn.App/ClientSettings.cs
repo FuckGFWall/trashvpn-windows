@@ -4,6 +4,11 @@ using System.Text.Json;
 namespace Xehn.App;
 public sealed class ClientSettings
 {
+    internal const int MinCacheDays = 1, MaxCacheDays = 36500;
+    internal const string InvalidCacheDays = "缓存有效期需在 1–36500 天之间。";
+    internal const string InvalidPort = "端口需在 1024–65535 之间。";
+    internal const string InvalidMtu = "MTU 应为 0（自动）或 576–9000。";
+    internal const string InvalidTimeout = "探测超时应为 1–60 秒。";
     public string Proto { get; set; } = "awg";
     public string Theme { get; set; } = "light";
     public string? Language { get; set; }
@@ -29,12 +34,12 @@ public sealed class ClientSettings
     public bool DnsOff { get; set; }
     public string Validate()
     {
-        if (!CacheNeverExpires && CacheDays is < 1 or > 36500) return "缓存有效期需在 1–36500 天之间。";
+        if (!CacheNeverExpires && CacheDays is < MinCacheDays or > MaxCacheDays) return InvalidCacheDays;
         if (!new[] { "low", "medium", "high" }.Contains(ScanIntensity)) return "未知的优选强度。";
-        if (MixedPort is < 1024 or > 65535 || ApiPort is < 1024 or > 65535) return "端口需在 1024–65535 之间。";
+        if (MixedPort is < 1024 or > 65535 || ApiPort is < 1024 or > 65535) return InvalidPort;
         if (MixedPort == ApiPort) return "代理端口与 API 端口不能相同。";
-        if (Mtu != 0 && Mtu is < 576 or > 9000) return "MTU 应为 0（自动）或 576–9000。";
-        if (TimeoutSec is < 1 or > 60) return "探测超时应为 1–60 秒。";
+        if (Mtu != 0 && Mtu is < 576 or > 9000) return InvalidMtu;
+        if (TimeoutSec is < 1 or > 60) return InvalidTimeout;
         if (!new[] { "awg", "wg", "masque", "masque-h2", "wwarp", "masque-mm" }.Contains(Proto)) return "未知的连接协议。";
         if (!new[] { "proxy", "tun" }.Contains(CaptureMode)) return "未知的接管方式。";
         if (!new[] { "global", "bypass" }.Contains(ProxyMode)) return "未知的路由模式。";

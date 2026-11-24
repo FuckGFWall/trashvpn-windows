@@ -2,12 +2,10 @@
   <img src="src/Xehn.App/Assets/logo-readme.png" alt="TrashVPN 图标" width="128">
 </p>
 <h1 align="center">TrashVPN for Windows</h1>
-<p align="center">一个简洁的 Windows WARP 客户端</p>
+<p align="center">一个运行在 Windows 上的第三方 WARP 客户端</p>
 <p align="center"><strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="README.fa.md">فارسی</a></p>
 
 ---
-
-Windows 上的第三方 Cloudflare WARP。
 
 ## 功能
 
@@ -49,6 +47,7 @@ Windows 上的第三方 Cloudflare WARP。
 
 ## 相关项目与致谢
 
-- [小何](https://github.com/hezhanleiok/xiaohe) 提供的优选引擎
+- [小何爱分享](https://github.com/hezhanleiok/xiaohe) 提供的优选引擎
+- [Oblivion](https://github.com/bepass-org/oblivion) 提供的快速优选思路
 - [TrashVPN for iOS](https://github.com/FuckGFWall/trashvpn-ios)
 - [第三方组件及许可证](engine/THIRD_PARTY_NOTICES.md)

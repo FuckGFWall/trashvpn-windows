@@ -37,7 +37,7 @@ const (
 	coreDirName = "core"
 	stateName   = "state.json"
 	// scanTTL is how long a scan result stays "fresh" before a connect re-scans.
-	scanTTL = 7 * 24 * time.Hour
+	scanTTL = defaultCacheDays * 24 * time.Hour
 )
 
 // appDir returns the client's working directory (created on demand).
@@ -371,7 +371,11 @@ func doScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRun, erro
 	}
 	desktopScanNote("rank", "筛选可用节点并按丢包与延迟排序")
 
-	return projectCacheEndpoints(ph), run, nil
+	results := projectCacheEndpoints(ph)
+	if opts.desktop && opts.earlyStop > 0 && len(results) > opts.earlyStop {
+		results = results[:opts.earlyStop]
+	}
+	return results, run, nil
 }
 
 // projectCacheEndpoints projects a finished scan into the cacheable records

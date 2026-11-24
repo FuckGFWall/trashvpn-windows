@@ -135,12 +135,12 @@ internal static class WorkflowChecks
         check(!JsonSerializer.Serialize(legacy, ClientSettings.JsonOptions).Contains("\"auto_connect\"") && !JsonSerializer.Serialize(legacy, ClientSettings.JsonOptions).Contains("\"auto_repair\""), "retired preferences are not written back");
         vm.AllowLan=true;
         check(vm.LanProxyEndpoints=="192.168.1.20:7891\n10.0.0.3:7891", "LAN details show actual injected addresses with proxy port, excluding duplicates and loopback");
-        vm.MixedPort=9090;
+        vm.MixedPortText="9090"; vm.CommitSettingsInput(nameof(MainViewModel.MixedPortText));
         check(vm.LanProxyEndpoints.Contains(":9090") && ClientSettings.Load(fake.Home).ApiPort!=9090 && vm.Notice=="", "proxy-port changes refresh LAN details and keep the hidden local controller port distinct");
         vm.AllowLan=false; check(vm.LanProxyEndpoints=="", "turning off LAN sharing clears its addresses");
-        vm.CacheNeverExpires=true; vm.CacheDays=0;
-        check(!vm.CanEditCacheDays && vm.Notice=="", "never-expire preference disables day editing without using its value");
-        vm.CacheDays=7; vm.CacheNeverExpires=false; vm.AutoConnectAfterPrepare=true;
+        vm.CacheNeverExpires=true; vm.CacheDaysText="0"; vm.CommitSettingsInput(nameof(MainViewModel.CacheDaysText));
+        check(!vm.CanEditCacheDays && vm.CacheDays==1 && vm.Notice=="", "never-expire preference disables day editing without using its value");
+        vm.CacheNeverExpires=false; vm.CacheDaysText="7"; vm.CommitSettingsInput(nameof(MainViewModel.CacheDaysText)); vm.AutoConnectAfterPrepare=true;
         var saved=ClientSettings.Load(fake.Home);
         check(saved.CacheDays==7 && !saved.CacheNeverExpires && saved.AutoConnectAfterPrepare, "cache lifetime and automatic post-selection connection survive settings persistence");
         vm.InitializePreparation(); fake.Fail(); PumpUntil(()=>!vm.IsPreparing);

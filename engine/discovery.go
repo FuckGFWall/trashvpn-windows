@@ -43,6 +43,9 @@ func fetchMeta(ctx context.Context, client *http.Client, url string) (string, bo
 		return "", false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if err != nil {
 		return "", false
@@ -51,13 +54,6 @@ func fetchMeta(ctx context.Context, client *http.Client, url string) (string, bo
 }
 
 const portProbeSample = 12
-
-func scanPortSamples(opts options) int {
-	if opts.portSamples > 0 {
-		return opts.portSamples
-	}
-	return portProbeSample // CLI scans retain their full default sample.
-}
 
 func haveAddrFamily(v6 bool) bool {
 	addrs, err := net.InterfaceAddrs()
