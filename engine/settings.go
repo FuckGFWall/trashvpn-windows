@@ -69,8 +69,11 @@ const (
 // here, so the file is also the single place to look when asking "what is this
 // install configured to do".
 type clientSettings struct {
-	VerifyBeforeConnect bool   `json:"verify_before_connect"`
-	ScanIntensity       string `json:"scan_intensity"`
+	VerifyBeforeConnect     bool   `json:"verify_before_connect"`
+	ScanIntensity           string `json:"scan_intensity"`
+	CacheDays               int    `json:"cache_days"`
+	CacheNeverExpires       bool   `json:"cache_never_expires"`
+	AutoConnectAfterPrepare bool   `json:"auto_connect_after_prepare"`
 
 	// Appearance. Applied live — switching theme or language repaints the
 	// window, it does not restart it.
@@ -86,8 +89,7 @@ type clientSettings struct {
 	// OpenVPN is the V2 egress switch: a VPN Gate relay dialled from inside the
 	// base protocol. Mutually exclusive with Psiphon — both replace the final
 	// exit, and a session can only land in one place.
-	OpenVPN    bool `json:"openvpn"`
-	AutoRepair bool `json:"auto_repair"`
+	OpenVPN bool `json:"openvpn"`
 	// PsiphonRegion is the preferred Psiphon exit country (ISO alpha-2, upper
 	// case). Empty means "automatic" — Psiphon picks the region itself.
 	PsiphonRegion string `json:"psiphon_region"`
@@ -136,8 +138,7 @@ type clientSettings struct {
 	DomainProxy  string `json:"domain_proxy"`
 
 	// Behaviour.
-	AutoConnect bool `json:"auto_connect"`
-	AutoStart   bool `json:"auto_start"`
+	AutoStart bool `json:"auto_start"`
 
 	// Starred holds endpoints marked as favourites; the node list shows them
 	// first and they survive a rescan.
@@ -151,17 +152,20 @@ type clientSettings struct {
 	IPv6        *bool `json:"ipv6,omitempty"`
 }
 
-const settingsName = "settings.json"
+const (
+	settingsName     = "settings.json"
+	defaultCacheDays = 1
+)
 
 func defaultSettings() clientSettings {
 	return clientSettings{
 		Theme:         themeLight,
 		ScanIntensity: "medium",
+		CacheDays:     defaultCacheDays,
 		Lang:          langZH,
 		Proto:         protoAWG,
 		OuterProto:    protoWG,
 		InnerProto:    protoWG,
-		AutoRepair:    true,
 		MixedPort:     core.DefaultMixedPort,
 		APIPort:       core.DefaultAPIPort,
 		CaptureMode:   captureProxy,
@@ -239,6 +243,9 @@ func saveSettings(s clientSettings) error {
 // unopenable window — a bad port, MTU or page name here would look like "the
 // client is broken", not "the file is wrong".
 func (s *clientSettings) normalize() {
+	if s.CacheDays < 1 || s.CacheDays > 36500 {
+		s.CacheDays = defaultCacheDays
+	}
 	switch s.Theme {
 	case themeLight, themeDark, themeAuto:
 	default:
@@ -416,6 +423,7 @@ func sortStrings(v []string) {
 // Session choices (proto, rescan, psiphon, pinned endpoint, protocol pair)
 // stay the caller's: they describe this connect, not the preference file.
 func (s clientSettings) apply(o *options) {
+	o.cacheDays, o.cacheNeverExpires = s.CacheDays, s.CacheNeverExpires
 	if s.MixedPort > 0 {
 		o.mixedPort = s.MixedPort
 	}
@@ -440,7 +448,6 @@ func (s clientSettings) apply(o *options) {
 	o.proxyMode = s.ProxyMode
 	o.domainDirect = s.domainDirectList()
 	o.domainProxy = s.domainProxyList()
-	o.noGuard = !s.AutoRepair
 	o.psiphonRegion = s.PsiphonRegion
 	o.openvpnRegion = s.OpenVPNRegion
 	o.openvpnNodePin = s.OpenVPNNode

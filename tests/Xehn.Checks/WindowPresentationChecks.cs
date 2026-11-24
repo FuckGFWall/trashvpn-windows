@@ -27,13 +27,13 @@ internal static class WindowPresentationChecks
         check(regular.Width == 900 && regular.Height == 680 && regular.Left == 510 && regular.Top == 180, "normal desktop preserves the smaller preferred size and centers it");
 
         // Native handle only: no MainWindow, Loaded handlers, tray, or engine.
-        var fixture = new Window { Width = 800, Height = 680, MinWidth = 800, MaxWidth = 800, MinHeight = 600, ShowActivated = false, ShowInTaskbar = false };
+        var fixture = new Window { Width = 800, Height = 680, MinWidth = 800, MaxWidth = 800, MinHeight = 680, MaxHeight = 680, ResizeMode = ResizeMode.CanMinimize, ShowActivated = false, ShowInTaskbar = false };
         try
         {
             var handle = new WindowInteropHelper(fixture).EnsureHandle();
             WindowPresentation.DisableMaximize(fixture);
             var style = GetWindowLong(handle, -16);
-            check((style & 0x10000) == 0 && (style & 0x20000) != 0 && (style & 0x40000) != 0, "native maximize is disabled while minimize and vertical resizing remain available");
+            check((style & 0x10000) == 0 && (style & 0x20000) != 0 && (style & 0x40000) == 0, "native minimize remains available while maximize and all resizing borders are disabled");
             check((GetMenuState(GetSystemMenu(handle, false), 0xF030, 0) & 3) != 0, "native system-menu maximize entry is greyed out");
             SendMessage(handle, 0x112, 0xF030, 0);
             check(!IsZoomed(handle) && fixture.WindowState == WindowState.Normal, "native maximize command cannot bypass fixed-width window policy");
@@ -74,8 +74,9 @@ internal static class WindowPresentationChecks
             source.RemoveHook(ObserveFrame);
             App.ApplyTheme("auto");
             check(App.IsDarkTheme == ((int?)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) == 0), "automatic title-bar theme resolves the actual system setting without modifying it");
-            WindowPresentation.FitToWorkArea(fixture, center: true, fixedWidth: 800);
+            WindowPresentation.FitToWorkArea(fixture, center: true, fixedWidth: 800, fixedHeight: 680);
             check(fixture.MinWidth == fixture.Width && fixture.MaxWidth == fixture.Width && fixture.Width <= 800, "work-area fitting locks horizontal minimum and maximum to the same width");
+            check(fixture.MinHeight == fixture.Height && fixture.MaxHeight == fixture.Height && fixture.Height <= 680, "work-area fitting also locks height and retains the preferred height for later restores");
             check((GetWindowLong(handle, -16) & 0x10000) == 0, "theme changes and work-area fitting cannot re-enable maximize");
             var constraints = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMinMax>());
             try
@@ -86,7 +87,7 @@ internal static class WindowPresentationChecks
                 Marshal.StructureToPtr(new NativeMinMax { MaxTrack = new NativePoint { X = 32767, Y = 32767 } }, constraints, false);
                 SendMessage(handle, 0x24, 0, constraints); // WM_GETMINMAXINFO
                 var limits = Marshal.PtrToStructure<NativeMinMax>(constraints);
-                check(limits.MinTrack.X > 0 && limits.MinTrack.X == limits.MaxTrack.X && limits.MinTrack.Y < limits.MaxTrack.Y, "native resize constraints lock width but leave a vertical size range");
+                check(limits.MinTrack.X > 0 && limits.MinTrack.X == limits.MaxTrack.X && limits.MinTrack.Y > 0 && limits.MinTrack.Y == limits.MaxTrack.Y, "native resize constraints lock both axes to the fitted fixed size");
             }
             finally { Marshal.FreeHGlobal(constraints); }
             var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
@@ -95,8 +96,8 @@ internal static class WindowPresentationChecks
             check(gotArea && gotBounds && native.Left >= info.Work.Left && native.Top >= info.Work.Top && native.Right <= info.Work.Right && native.Bottom <= info.Work.Bottom, "native window-frame bounds fit the current machine's actual monitor work area");
             var previousHeight = fixture.Height; var previousWidth = fixture.Width;
             fixture.Height -= 20;
-            WindowPresentation.FitToWorkArea(fixture, center: false, fixedWidth: 800);
-            check(fixture.Width == previousWidth && Math.Abs(fixture.Height - previousHeight + 20) < .1, "fixed horizontal width still permits vertical size changes");
+            WindowPresentation.FitToWorkArea(fixture, center: false, fixedWidth: 800, fixedHeight: 680);
+            check(fixture.Width == previousWidth && Math.Abs(fixture.Height - previousHeight) < .1, "a fixed-size fit restores preferred dimensions rather than retaining a smaller height");
         }
         finally { fixture.Close(); App.ApplyTheme("light"); }
     }

@@ -14,6 +14,10 @@ var desktopEventMu sync.Mutex
 var registrationProtocol string
 
 func desktopProgress(phase, text string, done, total int) {
+	if phase == "register" && desktopScan != nil {
+		desktopScan.registration(text, done, total)
+		return
+	}
 	desktopEvent(map[string]any{"type": "progress", "phase": phase, "text": text, "done": done, "total": total})
 }
 func desktopConnection(state string) {

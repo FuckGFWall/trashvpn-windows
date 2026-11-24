@@ -18,5 +18,7 @@
     <Resource Include="Assets\logo-rounded.ico" />
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
+    <InternalsVisibleTo Include="Xehn.Checks" />
+    <EmbeddedResource Include="Translations.tsv" />
   </ItemGroup>
 </Project>

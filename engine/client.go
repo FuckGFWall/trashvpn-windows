@@ -37,7 +37,7 @@ const (
 	coreDirName = "core"
 	stateName   = "state.json"
 	// scanTTL is how long a scan result stays "fresh" before a connect re-scans.
-	scanTTL = 6 * time.Hour
+	scanTTL = 7 * 24 * time.Hour
 )
 
 // appDir returns the client's working directory (created on demand).
@@ -259,8 +259,8 @@ func scanKeyFor(opts options) string {
 // for a chain (the outer half comes from the `outer` nest), the protocol
 // itself otherwise.
 func runCachedScan(ctx context.Context, opts options) ([]cachedEndpoint, protoRun, error) {
-	desktopScanBegin(opts.proto)
-	store, err := cache.Open(cache.Options{TTL: scanTTL})
+	desktopScanBegin(opts)
+	store, err := cache.Open(scanCacheOptions(opts))
 	if err != nil {
 		return nil, protoRun{}, err
 	}
@@ -691,6 +691,11 @@ func routeRules(o options, egress string) []string {
 		// everything else to the exit.
 		rules = append(rules, quicBlockRuleAll)
 		return append(rules, privateRules()...)
+	}
+	if o.desktop && o.proxyMode == modeBypass {
+		// Keep the application's Release check in the tunnel, regardless of
+		// how the installed GeoSite database categorizes GitHub's API.
+		rules = append(rules, "DOMAIN,api.github.com,"+egress)
 	}
 	if geo {
 		rules = append(rules, quicBlockRule)
@@ -1298,8 +1303,12 @@ func pickForced(results []cachedEndpoint, addr string) (cachedEndpoint, bool) {
 }
 
 // cachedScanFor returns the stored scan for proto, when one exists and is fresh.
-func cachedScanFor(proto string, ipv6 bool) (cachedScan, bool) {
-	store, err := cache.Open(cache.Options{TTL: scanTTL})
+func cachedScanFor(proto string, ipv6 bool, policy ...options) (cachedScan, bool) {
+	o := options{}
+	if len(policy) > 0 {
+		o = policy[0]
+	}
+	store, err := cache.Open(scanCacheOptions(o))
 	if err != nil {
 		return cachedScan{}, false
 	}
@@ -1312,6 +1321,22 @@ func cachedScanFor(proto string, ipv6 bool) (cachedScan, bool) {
 		return cachedScan{}, false
 	}
 	return cs, true
+}
+
+func scanCacheOptions(o options) cache.Options {
+	result := cache.Options{TTL: scanTTL}
+	if o.desktop || o.cacheDays > 0 || o.cacheNeverExpires {
+		days := o.cacheDays
+		if days < 1 || days > 36500 {
+			days = defaultCacheDays
+		}
+		ttl := time.Duration(days) * 24 * time.Hour
+		if o.cacheNeverExpires {
+			ttl = 0
+		}
+		result.ScanTTL = &ttl
+	}
+	return result
 }
 
 func betterEndpoint(a, b cachedEndpoint) bool {

@@ -1,4 +1,4 @@
-param([string]$CoreSource, [string]$GoExecutable)
+param([string]$CoreSource, [string]$GoExecutable, [string]$OutputPath, [switch]$SelfContained)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 if (-not $GoExecutable) {
@@ -6,7 +6,7 @@ if (-not $GoExecutable) {
     $GoExecutable = if (Test-Path -LiteralPath $privateGo) { $privateGo } else { 'go' }
 }
 $dotnet = if (Get-Command dotnet -ErrorAction SilentlyContinue) { 'dotnet' } else { Join-Path $env:ProgramFiles 'dotnet\dotnet.exe' }
-$output = Join-Path $root 'artifacts\app'
+$output = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else { Join-Path $root 'artifacts\app' }
 # Do not replace binaries that belong to a running client (including its core).
 $running = Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($output + '\', [StringComparison]::OrdinalIgnoreCase) }
 if ($running) { throw '构建目录中的客户端或内核仍在运行。请先自行退出客户端，再运行 build.ps1；不会自动停止进程。' }
@@ -14,10 +14,15 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:GOCACHE = Join-Path $root '.cache\go-build'
 $env:GOMODCACHE = Join-Path $root '.cache\go-mod'
 New-Item -ItemType Directory -Force $output,"$output\engine",$env:GOCACHE,$env:GOMODCACHE | Out-Null
-& $dotnet build "$root\src\Xehn.App\Xehn.App.csproj" -c Release -o $output --nologo
+if ($SelfContained) {
+    & $dotnet publish "$root\src\Xehn.App\Xehn.App.csproj" -c Release -r win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -o $output --nologo
+} else {
+    & $dotnet build "$root\src\Xehn.App\Xehn.App.csproj" -c Release -o $output --nologo
+}
 if ($LASTEXITCODE) { throw 'WPF build failed' }
 Push-Location "$root\engine"
 try {
+    if ($SelfContained) { $env:GOOS = 'windows'; $env:GOARCH = 'amd64' }
     & $GoExecutable build -trimpath -ldflags '-s -w -H windowsgui -X main.version=1.0.0 -X main.windowsGUIBuild=1' -o "$output\engine\xehn-engine.exe" .
     if ($LASTEXITCODE) { throw 'Engine build failed' }
 } finally { Pop-Location }

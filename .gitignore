@@ -9,3 +9,7 @@ runtime/
 .vs/
 **/.vs/
 engine/*.exe
+
+# Private code-signing certificates
+*.pfx
+*.p12

@@ -29,10 +29,13 @@ func inspectResources(ctx context.Context, dir string, probe bool) resourceStatu
 	bin := core.CoreInDir(dir)
 	if _, e := os.Stat(bin); e != nil {
 		s.CoreNeedsDownload = true
-		s.CoreCheck = "未找到内核"
+		s.CoreCheck = "内核文件暂时无法访问"
+		if os.IsNotExist(e) {
+			s.CoreCheck = "未找到内核"
+		}
 		return s
 	}
-	version, e := core.BinaryVersionContext(ctx, bin)
+	version, e := readResourceVersion(ctx, bin, core.BinaryVersionContext)
 	s.CoreVersion = version
 	if e != nil {
 		s.CoreNeedsDownload = true
@@ -48,6 +51,32 @@ func inspectResources(ctx context.Context, dir string, probe bool) resourceStatu
 		}
 	}
 	return s
+}
+
+// Tolerate a transient launch/read failure with one bounded, read-only -v
+// retry. A failed version read is not evidence that the executable is absent.
+func readResourceVersion(ctx context.Context, bin string, read func(context.Context, string) (string, error)) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	version, err := read(ctx, bin)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if err == nil {
+		return version, err
+	}
+	timer := time.NewTimer(200 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-timer.C:
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return read(ctx, bin)
+	}
 }
 func strictCoreCheck(ctx context.Context, bin, dir string) error {
 	names := []string{protoAWG, protoWG, protoMASQUE, protoMASQUEH2, protoWWarp, protoMASQUEMASQUE, probeOpenVPNProto}

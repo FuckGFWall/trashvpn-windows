@@ -2,6 +2,29 @@ package main
 
 import "testing"
 
+func TestDesktopGuardRetainsDNSAndProxyMode(t *testing.T) {
+	t.Setenv("WARP_CLIENT_HOME", t.TempDir())
+	s := defaultSettings()
+	s.DNSCustom = "9.9.9.9"
+	s.ProxyMode = modeBypass
+	s.CacheDays = 5
+	if err := saveSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	st := clientState{Proto: protoWG, Endpoint: "192.0.2.1:2408", TUN: true, NoProxy: true,
+		MixedPort: 17991, APIPort: 19090, Family: famV4, Verification: "verified"}
+	o := optionsFromState(st)
+	if !o.desktop || !o.guardRepair || o.optimistic || o.proto != protoWG || !o.tunMode || !o.noProxy ||
+		o.mixedPort != 17991 || o.apiPort != 19090 || o.family != famV4 ||
+		confDNS(o) != "9.9.9.9" || o.proxyMode != modeBypass || o.cacheDays != 5 {
+		t.Fatalf("repair lost its session identity or desktop settings: %+v", o)
+	}
+	st.Verification = ""
+	if o = optionsFromState(st); o.desktop || o.guardRepair {
+		t.Fatal("legacy non-desktop guard unexpectedly used desktop settings")
+	}
+}
+
 // The failure counter is the difference between a session that shakes off a
 // hiccup and one that throws away a working endpoint: a torn-down endpoint
 // shows up here as the same generic error a single DNS timeout does, so the

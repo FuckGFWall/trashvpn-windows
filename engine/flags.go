@@ -18,9 +18,12 @@ import (
 type options struct {
 	scanned                     *bool
 	desktop                     bool
+	guardRepair                 bool
 	prepareOnly                 bool
 	optimistic                  bool
 	scanIntensity               string
+	cacheDays                   int
+	cacheNeverExpires           bool
 	portSamples                 int
 	scanBudget, candidateBudget time.Duration
 
@@ -98,9 +101,6 @@ type options struct {
 	// dnsLeak routes resolver queries through the tunnel and, in TUN mode,
 	// requests the core hijack port 53.
 	dnsLeak bool
-	// noGuard turns off the background health guard: the session runs, but
-	// nothing rebuilds it if it breaks.
-	noGuard bool
 	// earlyStop, when > 0, lets a scan stop verifying once that many durable
 	// endpoints are found. Set by the connect path (the user is waiting, and a
 	// connect needs one endpoint); 0 for a plain `scan`, which measures all.

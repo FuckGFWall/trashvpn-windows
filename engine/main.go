@@ -240,7 +240,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	// only proven through the outer tunnel.
 	if opts.through == "" {
 		if ces := projectCacheEndpoints(ph); len(ces) > 0 {
-			if store, err := cache.Open(cache.Options{TTL: scanTTL}); err == nil {
+			if store, err := cache.Open(scanCacheOptions(opts)); err == nil {
 				cs := cachedScan{Proto: opts.proto, IPv6: opts.ipv6, At: time.Now(), Results: ces}
 				if raw, err := json.Marshal(cs); err == nil {
 					_ = store.Put(scanCacheKey(opts.proto, opts.ipv6), raw)

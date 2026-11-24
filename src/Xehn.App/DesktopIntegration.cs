@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Windows;
 using Microsoft.Win32;
@@ -46,9 +47,11 @@ public sealed class DesktopIntegration : IDesktopIntegration
     public async Task<bool> RestartElevatedAsync(bool reconnect, Func<Task<bool>> prepare)
     {
         var token = Guid.NewGuid().ToString("N");
-        using var ready = new EventWaitHandle(false, EventResetMode.ManualReset, EventName(token, "ready"));
-        using var abort = new EventWaitHandle(false, EventResetMode.ManualReset, EventName(token, "abort"));
-        using var started = new EventWaitHandle(false, EventResetMode.ManualReset, EventName(token, "started"));
+        using var identity = WindowsIdentity.GetCurrent();
+        var caller = identity.User ?? throw new IOException("无法启动管理员进程。");
+        using var ready = CreateRestartEvent(EventName(token, "ready"), caller, EventWaitHandleRights.Synchronize);
+        using var abort = CreateRestartEvent(EventName(token, "abort"), caller, EventWaitHandleRights.Synchronize);
+        using var started = CreateRestartEvent(EventName(token, "started"), caller, EventWaitHandleRights.Modify);
         var start = new ProcessStartInfo(Executable) { UseShellExecute = true, Verb = "runas", WorkingDirectory = AppContext.BaseDirectory };
         foreach (var arg in new[] { "--elevated-restart", Environment.ProcessId.ToString(), token, reconnect ? "1" : "0" }) start.ArgumentList.Add(arg);
         Process? child;
@@ -86,6 +89,19 @@ public sealed class DesktopIntegration : IDesktopIntegration
     }
     public static bool NeedsStartupElevation(string captureMode, bool elevated) => captureMode == "tun" && !elevated;
     private static string EventName(string token, string kind) => @"Local\Xehn.Restart." + token + "." + kind;
+    private static EventWaitHandle CreateRestartEvent(string name, SecurityIdentifier caller, EventWaitHandleRights childRights)
+    {
+        // UAC may use a different administrator account. Grant that group
+        // only the child's side of the handshake, not full event control.
+        var security = new EventWaitHandleSecurity();
+        security.AddAccessRule(new EventWaitHandleAccessRule(caller, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new EventWaitHandleAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            childRights, AccessControlType.Allow));
+        var handle = EventWaitHandleAcl.Create(false, EventResetMode.ManualReset, name, out var created, security);
+        if (created) return handle;
+        handle.Dispose();
+        throw new IOException("无法启动管理员进程。");
+    }
     public static async Task<bool> WaitForRestartAsync(string[] args)
     {
         if (args.Length != 4 || args[0] != "--elevated-restart" || !int.TryParse(args[1], out var pid) || pid <= 0 ||
@@ -95,14 +111,14 @@ public sealed class DesktopIntegration : IDesktopIntegration
             using var parent = Process.GetProcessById(pid);
             // Do not wait on arbitrary processes supplied on a command line.
             if (!string.Equals(parent.MainModule?.FileName, Executable, StringComparison.OrdinalIgnoreCase)) return false;
-            using var ready = EventWaitHandle.OpenExisting(EventName(args[2], "ready"));
-            using var abort = EventWaitHandle.OpenExisting(EventName(args[2], "abort"));
-            using var started = EventWaitHandle.OpenExisting(EventName(args[2], "started"));
+            using var ready = EventWaitHandleAcl.OpenExisting(EventName(args[2], "ready"), EventWaitHandleRights.Synchronize);
+            using var abort = EventWaitHandleAcl.OpenExisting(EventName(args[2], "abort"), EventWaitHandleRights.Synchronize);
+            using var started = EventWaitHandleAcl.OpenExisting(EventName(args[2], "started"), EventWaitHandleRights.Modify);
             started.Set();
             if (await Task.Run(() => WaitHandle.WaitAny([ready, abort], TimeSpan.FromMinutes(2))) != 0) return false;
             await parent.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
             return true;
         }
-        catch (Exception e) when (e is ArgumentException or Win32Exception or WaitHandleCannotBeOpenedException or TimeoutException or InvalidOperationException or UnauthorizedAccessException) { return false; }
+        catch (Exception e) when (e is ArgumentException or Win32Exception or WaitHandleCannotBeOpenedException or TimeoutException or InvalidOperationException or UnauthorizedAccessException or IOException) { return false; }
     }
 }

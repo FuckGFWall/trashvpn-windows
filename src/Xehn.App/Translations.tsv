@@ -1,0 +1,259 @@
+# Chinese source	English	Persian
+首页	Home	خانه
+设置	Settings	تنظیمات
+关于	About	درباره
+日志	Logs	گزارش‌ها
+有更新	Update	به‌روزرسانی
+重新优选	Rescan	اسکن مجدد
+代理	Proxy	پروکسی
+全局	Global	سراسری
+分流	Split	تفکیکی
+国家	Country	کشور
+数据中心	DC	مرکز داده
+延迟	Latency	تأخیر
+↑  上传	↑  Upload	↑  ارسال
+↓  下载	↓  Download	↓  دریافت
+连接协议	Connection protocol	پروتکل اتصال
+隧道协议	Tunnel protocol	پروتکل تونل
+导出节点配置	Export node configuration	صدور پیکربندی گره
+节点导出格式	Node export format	قالب صدور گره
+复制	Copy	کپی
+外观	Appearance	ظاهر
+主题	Theme	پوسته
+浅色	Light	روشن
+深色	Dark	تیره
+跟随系统	System	سیستم
+语言	Language	زبان
+连接行为	Connection behavior	رفتار اتصال
+优选完成后自动连接 VPN	Connect to VPN when node selection finishes	اتصال خودکار VPN پس از انتخاب گره
+连接前检查节点可用性	Verify the node before showing a connection	بررسی گره پیش از نمایش اتصال
+关闭：真实 HTTPS 连通并接管流量后显示已连接，后台继续载荷验证；失败会恢复代理并断开。开启：全部验证通过后再显示已连接。	Off: show Connected after HTTPS works and traffic is captured, then finish verification in the background. If it fails, restore the proxy and disconnect. On: wait until all checks pass.	خاموش: پس از برقراری HTTPS و هدایت ترافیک، وضعیت اتصال نمایش داده می‌شود و بررسی در پس‌زمینه ادامه دارد. در صورت شکست، پروکسی بازیابی و اتصال قطع می‌شود. روشن: تا پایان همه بررسی‌ها صبر می‌کند.
+优选强度	Scan intensity	شدت اسکن
+缓存永不过期	Never expire the cache	حافظهٔ نهان منقضی نشود
+缓存有效期（天）	Cache lifetime (days)	مدت اعتبار حافظهٔ نهان (روز)
+探测超时（秒）	Probe timeout (seconds)	مهلت آزمون (ثانیه)
+启动与窗口	Startup and window	راه‌اندازی و پنجره
+关闭窗口后，在托盘继续运行	Keep running in the tray when the window closes	پس از بستن پنجره در ناحیهٔ اعلان اجرا بماند
+开机自启动	Start with Windows	اجرا هنگام راه‌اندازی ویندوز
+网络	Network	شبکه
+本地代理端口	Local proxy port	درگاه پروکسی محلی
+地址族	Address family	خانوادهٔ نشانی
+双栈	Dual stack	دوپشته
+MTU（0 为自动）	MTU (0 = automatic)	MTU ‏(۰ = خودکار)
+允许局域网访问	Allow LAN access	اجازهٔ دسترسی شبکهٔ محلی
+自定义 DNS	Custom DNS	DNS سفارشی
+多个解析器使用逗号分隔	Separate multiple resolvers with commas	نشانی‌های حل‌کننده را با ویرگول جدا کنید
+留空则使用默认 DNS 1.1.1.1	Leave blank to use the default DNS 1.1.1.1	برای استفاده از DNS پیش‌فرض 1.1.1.1 خالی بگذارید
+DNS 防泄漏	DNS leak protection	جلوگیری از نشت DNS
+不向隧道下发 DNS	Do not set tunnel DNS	DNS تونل تنظیم نشود
+GitHub 项目主页 ↗	Project on GitHub ↗	پروژه در GitHub ↗
+上次更新：	Last updated:\s	آخرین به‌روزرسانی:\s
+开源与致谢	Open source & credits	متن‌باز و سپاسگزاری
+原项目 XEHN ↗	Original XEHN project ↗	پروژهٔ اصلی XEHN ↗
+mihomo 内核 ↗	mihomo core ↗	هستهٔ mihomo ↗
+第三方许可	Third-party licenses	مجوزهای شخص ثالث
+运行日志	Runtime logs	گزارش اجرا
+复制日志	Copy logs	کپی گزارش‌ها
+低	Low	کم
+中	Mid	متوسط
+高	High	زیاد
+低、中、高三档；拖动或使用左右方向键调整。	Low, medium, and high. Drag or use the arrow keys.	کم، متوسط و زیاد. دستگیره را بکشید یا از کلیدهای جهت‌نما استفاده کنید.
+显示主界面	Show window	نمایش پنجره
+退出	Exit	خروج
+检查	Check	بررسی
+下载	Download	دریافت
+发现新版本 	New version:\s	نسخهٔ جدید:\s
+尚未检查	Not checked	بررسی نشده
+尚未更新	Not updated	به‌روز نشده
+未安装	Not installed	نصب نشده
+未找到内核	Core not found	هسته یافت نشد
+版本暂时无法读取	Version unavailable	نسخه در دسترس نیست
+正在读取版本…	Reading version…	در حال خواندن نسخه…
+安装 / 替换成功	Installed / replaced	نصب یا جایگزین شد
+替换成功	Replaced	جایگزین شد
+检查通过	Check passed	بررسی موفق بود
+全部协议检查通过	All protocol checks passed	بررسی همهٔ پروتکل‌ها موفق بود
+检查通过，无需更新	Up to date	به‌روز است
+注册	Register	ثبت
+就绪	Ready	آماده
+注册 · 待检查	Registration · pending	ثبت · در انتظار بررسی
+优选 · 待检查	Node selection · pending	انتخاب گره · در انتظار بررسی
+等待检查账号与缓存	Waiting to check account and cache	در انتظار بررسی حساب و حافظهٔ نهان
+缓存已就绪	Cache ready	حافظهٔ نهان آماده است
+已暂停 · 	Paused ·\s	متوقف شده ·\s
+继续	Resume	ادامه
+暂停	Pause	مکث
+未连接	Offline	قطع
+已连接（检测中）	Connected (verifying)	متصل (در حال بررسی)
+已连接	Connected	متصل
+正在检查	Checking…	در حال بررسی
+正在连接 VPN…	Connecting VPN…	در حال اتصال VPN…
+关闭 VPN	Disconnect VPN	قطع VPN
+连接 VPN	Connect VPN	اتصال VPN
+取消连接	Cancel connection	لغو اتصال
+重试清理连接	Retry connection cleanup	تلاش مجدد برای پاک‌سازی اتصال
+断开连接	Disconnect	قطع اتصال
+连接 WARP	Connect WARP	اتصال WARP
+点击电源，开启连接	Click the power button to connect	برای اتصال دکمهٔ روشن/خاموش را بزنید
+开机自启动设置失败：	Could not set Windows startup:\s	تنظیم اجرای خودکار ناموفق بود:\s
+无法读取设置，已禁止连接以保护原文件：	Could not read settings. Connections are disabled to protect the file:\s	خواندن تنظیمات ناموفق بود. برای محافظت از فایل، اتصال غیرفعال شد:\s
+无法读取开机自启动状态：	Could not read Windows startup status:\s	خواندن وضعیت اجرای خودکار ناموفق بود:\s
+暂时无法读取局域网地址	LAN addresses unavailable	نشانی‌های شبکهٔ محلی در دسترس نیست
+未检测到可用的局域网地址	No usable LAN address found	نشانی قابل استفاده‌ای در شبکهٔ محلی یافت نشد
+TUN 需要管理员权限，正在请求授权重启…	TUN needs administrator permission. Requesting an elevated restart…	حالت TUN نیاز به دسترسی مدیر دارد. در حال درخواست راه‌اندازی مجدد…
+旧连接未断开，已取消重启。	The old connection is still active. Restart canceled.	اتصال قبلی هنوز فعال است. راه‌اندازی مجدد لغو شد.
+已取消管理员重启，保留原模式。	Elevated restart canceled. The original mode was kept.	راه‌اندازی مجدد با دسترسی مدیر لغو شد. حالت قبلی حفظ شد.
+正在切换模式，等待真实连接验证	Switching mode and verifying the connection	در حال تغییر حالت و بررسی اتصال
+模式已应用，但设置未保存。	Mode applied, but settings were not saved.	حالت اعمال شد، اما تنظیمات ذخیره نشد.
+模式切换失败：	Could not change mode:\s	تغییر حالت ناموفق بود:\s
+ 回滚失败，请检查当前模式：	 Rollback failed. Check the current mode:\s	 بازیابی ناموفق بود. حالت فعلی را بررسی کنید:\s
+设置保存失败：	Could not save settings:\s	ذخیرهٔ تنظیمات ناموفق بود:\s
+检查账号与节点缓存	Checking account and node cache	در حال بررسی حساب و حافظهٔ گره‌ها
+注册 · 检查账号	Registration · checking account	ثبت · بررسی حساب
+优选 · 等待注册	Node selection · waiting for registration	انتخاب گره · در انتظار ثبت
+注册 · 已就绪	Registration · ready	ثبت · آماده
+注册或优选未完成，请查看提示	Registration or node selection did not finish	ثبت یا انتخاب گره تکمیل نشد
+已取消准备。	Preparation canceled.	آماده‌سازی لغو شد.
+准备失败：	Preparation failed:\s	آماده‌سازی ناموفق بود:\s
+正在验证真实连接	Verifying connection	در حال بررسی اتصال
+注册 · 	Registration ·\s	ثبت ·\s
+优选 · 	Node selection ·\s	انتخاب گره ·\s
+优选 · 未完成，请查看提示	Node selection · not completed	انتخاب گره · تکمیل نشده
+正在取消	Canceling…	در حال لغو
+已取消准备	Preparation canceled	آماده‌سازی لغو شد
+已取消管理员重启。	Elevated restart canceled.	راه‌اندازی مجدد با دسترسی مدیر لغو شد.
+管理员重启失败：	Elevated restart failed:\s	راه‌اندازی مجدد با دسترسی مدیر ناموفق بود:\s
+正在断开	Disconnecting…	در حال قطع
+连接准备尚未开始。	Connection preparation has not started.	آماده‌سازی اتصال آغاز نشده است.
+注册或优选未完成，未启动连接。	Registration or node selection did not finish. No connection was started.	ثبت یا انتخاب گره تکمیل نشد. اتصال آغاز نشد.
+设置无效，未启动连接。	Settings are invalid. No connection was started.	تنظیمات نامعتبر است. اتصال آغاز نشد.
+正在连接	Connecting…	در حال اتصال
+已取消连接。	Connection canceled.	اتصال لغو شد.
+连接异常，请断开后重试	Connection failed. Disconnect and try again.	اتصال دچار مشکل شد. قطع کنید و دوباره تلاش کنید.
+内核已连接，但系统代理设置失败，请查看日志。	The core is connected, but system proxy setup failed. See the logs.	هسته متصل است، اما تنظیم پروکسی سیستم ناموفق بود. گزارش‌ها را ببینید.
+流量接口不可用	Traffic stats unavailable	آمار ترافیک در دسترس نیست
+读取连接状态失败：	Could not read connection status:\s	خواندن وضعیت اتصال ناموفق بود:\s
+请先连接 VPN，再检查更新。	Connect the VPN before checking for updates.	پیش از بررسی به‌روزرسانی، VPN را وصل کنید.
+已是最新版本。	You're up to date.	آخرین نسخه نصب است.
+连接已改变，请重试检查更新。	The connection changed. Check for updates again.	اتصال تغییر کرد. بررسی به‌روزرسانی را تکرار کنید.
+检查更新失败，请稍后重试。	Update check failed. Try again later.	بررسی به‌روزرسانی ناموفق بود. بعداً دوباره تلاش کنید.
+正在获取内核下载信息…	Getting core download information…	در حال دریافت اطلاعات بارگیری هسته…
+正在下载 GeoFiles…	Downloading GeoFiles…	در حال دریافت GeoFiles…
+GeoFiles 已下载，但替换未完成，请重试。	GeoFiles downloaded, but not replaced. Try again.	GeoFiles دریافت شد، اما جایگزین نشد. دوباره تلاش کنید.
+mihomo 安装 / 替换成功（	mihomo installed or replaced (	هستهٔ mihomo نصب یا جایگزین شد (
+mihomo 检查通过，支持全部协议。	mihomo supports all protocols.	هستهٔ mihomo از همهٔ پروتکل‌ها پشتیبانی می‌کند.
+检查完成：GeoFiles 缺失、不完整或已超过 7 天，请下载更新。	GeoFiles are missing, incomplete, or over 7 days old. Download the update.	فایل‌های GeoFiles ناقص، مفقود یا قدیمی‌تر از ۷ روز هستند. به‌روزرسانی را دریافت کنید.
+GeoFiles 检查通过：文件齐全，未超过 7 天，无需更新。	GeoFiles are complete and up to date.	فایل‌های GeoFiles کامل و به‌روز هستند.
+下载完成，等待 VPN 断开后替换。	Downloaded. Will replace after VPN disconnects.	دریافت شد. پس از قطع VPN جایگزین می‌شود.
+GeoFiles 已下载，将在本次 VPN 断开后替换。	GeoFiles downloaded. They will be replaced after VPN disconnects.	فایل‌های GeoFiles دریافت شدند و پس از قطع VPN جایگزین می‌شوند.
+内核版本读取未完成，请重试。	Could not read the core version. Try again.	خواندن نسخهٔ هسته ناموفق بود. دوباره تلاش کنید.
+内核下载 / 替换未完成，请重试。	Core download or replacement failed. Try again.	دریافت یا جایگزینی هسته ناموفق بود. دوباره تلاش کنید.
+mihomo 检查未完成，请重试；详情见日志。	mihomo check failed. Try again or see the logs.	بررسی mihomo ناموفق بود. دوباره تلاش کنید یا گزارش‌ها را ببینید.
+GeoFiles 下载未完成，请重试。	GeoFiles download failed. Try again.	دریافت GeoFiles ناموفق بود. دوباره تلاش کنید.
+GeoFiles 检查未完成，请重试。	GeoFiles check failed. Try again.	بررسی GeoFiles ناموفق بود. دوباره تلاش کنید.
+资源检查 / 下载未完成：	Resource check or download did not finish:\s	بررسی یا دریافت منابع تکمیل نشد:\s
+下载完成，正在校验…	Downloaded. Validating…	دریافت شد. در حال اعتبارسنجی…
+mihomo 已替换成功。	mihomo replaced.	هستهٔ mihomo جایگزین شد.
+GeoFiles 已替换成功。	GeoFiles replaced.	فایل‌های GeoFiles جایگزین شدند.
+GeoFiles 替换未完成，请检查后重试。	GeoFiles replacement failed. Check and try again.	جایگزینی GeoFiles ناموفق بود. بررسی کنید و دوباره تلاش کنید.
+正在处理…	Working…	در حال پردازش…
+正在退出，清理连接	Disconnecting and exiting	در حال قطع اتصال و خروج
+退出清理未完成：VPN 仍处于连接状态，请重试退出。	VPN is still connected. Try exiting again.	VPN هنوز متصل است. دوباره برای خروج تلاش کنید.
+退出清理失败：	Could not clean up the connection on exit:\s	پاک‌سازی اتصال هنگام خروج ناموفق بود:\s
+已取消管理员启动；TUN 连接仍需管理员授权。	Elevated startup canceled. TUN still requires administrator permission.	شروع با دسترسی مدیر لغو شد. TUN همچنان به دسترسی مدیر نیاز دارد.
+便携版目录不可写。请把完整程序移到可写目录后重试。	The portable folder is not writable. Move the entire app to a writable folder and try again.	پوشهٔ نسخهٔ قابل‌حمل قابل نوشتن نیست. کل برنامه را به پوشه‌ای قابل نوشتن منتقل کنید و دوباره تلاش کنید.
+已取消管理员授权，便携版未启动。	Administrator permission was declined. The portable app did not start.	مجوز مدیر داده نشد. برنامهٔ قابل‌حمل اجرا نشد.
+管理员启动未完成：	Elevated startup did not finish:\s	راه‌اندازی با دسترسی مدیر تکمیل نشد:\s
+托盘初始化失败，关闭窗口将退出：	Could not initialize the tray. Closing the window will exit:\s	راه‌اندازی ناحیهٔ اعلان ناموفق بود. بستن پنجره باعث خروج می‌شود:\s
+暂无运行日志	No logs yet	هنوز گزارشی وجود ندارد
+已复制	Copied	کپی شد
+正在导出	Exporting…	در حال صدور…
+复制节点配置	Copy node configuration	کپی پیکربندی گره
+当前协议暂无可导出的客户端格式。	No export format is available for this protocol.	هیچ قالب صدوری برای این پروتکل در دسترس نیست.
+导出所选协议的全部有效缓存节点，每个节点使用不同名称；固定节点不限制导出范围，不会重新扫描。配置含私钥，请勿公开分享。JSON 为节点配置片段，需合并到目标客户端配置中。	Exports all valid cached nodes for this protocol, with distinct names. Pinning does not limit export and no new scan is run. The configuration contains private keys: do not share it publicly. Merge the JSON fragment into the target client's configuration.	همهٔ گره‌های معتبر ذخیره‌شده برای این پروتکل با نام‌های جداگانه صادر می‌شوند. سنجاق‌کردن دامنهٔ صدور را محدود نمی‌کند و اسکن جدیدی انجام نمی‌شود. پیکربندی کلید خصوصی دارد؛ آن را عمومی نکنید. قطعهٔ JSON را به پیکربندی برنامهٔ مقصد اضافه کنید.
+节点配置复制失败：	Could not copy node configuration:\s	کپی پیکربندی گره ناموفق بود:\s
+无法读取导出设置。	Could not read export settings.	خواندن تنظیمات صدور ناموفق بود.
+未收到节点配置，请等待优选完成后再试。	No node configuration received. Wait for selection to finish and try again.	پیکربندی گره دریافت نشد. پس از پایان انتخاب دوباره تلاش کنید.
+导出结果为空，未修改剪贴板。	Export was empty. The clipboard was not changed.	نتیجهٔ صدور خالی بود. کلیپ‌بورد تغییر نکرد.
+缓存有效期需在 1–36500 天之间。	Cache lifetime must be 1–36500 days.	مدت اعتبار حافظهٔ نهان باید بین ۱ تا ۳۶۵۰۰ روز باشد.
+未知的优选强度。	Unknown scan intensity.	شدت اسکن ناشناخته است.
+端口需在 1024–65535 之间。	Ports must be between 1024 and 65535.	درگاه‌ها باید بین ۱۰۲۴ تا ۶۵۵۳۵ باشند.
+代理端口与 API 端口不能相同。	Proxy and API ports must differ.	درگاه‌های پروکسی و API باید متفاوت باشند.
+MTU 应为 0（自动）或 576–9000。	MTU must be 0 (automatic) or 576–9000.	MTU باید ۰ (خودکار) یا بین ۵۷۶ تا ۹۰۰۰ باشد.
+探测超时应为 1–60 秒。	Probe timeout must be 1–60 seconds.	مهلت آزمون باید ۱ تا ۶۰ ثانیه باشد.
+未知的连接协议。	Unknown connection protocol.	پروتکل اتصال ناشناخته است.
+未知的接管方式。	Unknown capture mode.	شیوهٔ هدایت ترافیک ناشناخته است.
+未知的路由模式。	Unknown routing mode.	حالت مسیریابی ناشناخته است.
+未知的地址族。	Unknown address family.	خانوادهٔ نشانی ناشناخته است.
+嵌套协议仅支持 IPv4，请修改地址族。	Nested protocols require IPv4. Change the address family.	پروتکل‌های تودرتو به IPv4 نیاز دارند. خانوادهٔ نشانی را تغییر دهید.
+设置文件为空。	The settings file is empty.	فایل تنظیمات خالی است.
+引擎正在执行另一项操作。	The engine is busy with another operation.	موتور درگیر عملیات دیگری است.
+尚未构建连接引擎，请运行 build.ps1。	The connection engine is missing. Reinstall or run build.ps1.	موتور اتصال یافت نشد. دوباره نصب کنید یا build.ps1 را اجرا کنید.
+无法启动本地引擎。	Could not start the local engine.	راه‌اندازی موتور محلی ناموفق بود.
+引擎操作失败（	Engine operation failed (	عملیات موتور ناموفق بود (
+），详情见日志。	). See the logs.	). گزارش‌ها را ببینید.
+内核未返回流量数据。	The core did not return traffic data.	هسته دادهٔ ترافیک برنگرداند.
+资源操作未返回检查结果。	The resource operation returned no result.	عملیات منابع نتیجه‌ای برنگرداند.
+GitHub 未返回有效的正式版本号。	GitHub did not return a valid stable version.	GitHub شمارهٔ نسخهٔ پایدار معتبری برنگرداند.
+请先构建主程序后启用开机自启动。	Build or install the app before enabling startup.	پیش از فعال‌کردن اجرای خودکار، برنامه را نصب کنید.
+程序路径过长，无法注册开机自启动。	The app path is too long to register for startup.	مسیر برنامه برای ثبت اجرای خودکار بیش از حد طولانی است.
+开机自启动设置未生效。	The Windows startup setting was not applied.	تنظیم اجرای خودکار ویندوز اعمال نشد.
+无法启动管理员进程。	Could not start the administrator process.	راه‌اندازی فرایند مدیر ناموفق بود.
+管理员进程未就绪或提前退出，未关闭当前客户端。	The elevated process did not become ready. The current client remains open.	فرایند مدیر آماده نشد. برنامهٔ فعلی باز می‌ماند.
+管理员进程提前退出，未关闭当前客户端。	The elevated process exited early. The current client remains open.	فرایند مدیر زود بسته شد. برنامهٔ فعلی باز می‌ماند.
+正在下载缺失数据库…	Downloading missing databases…	در حال دریافت پایگاه‌های دادهٔ مفقود…
+正在检查…	Checking…	در حال بررسی…
+GeoIP / GeoSite 已就绪（本地大小检查，非远端版本检查）	GeoIP / GeoSite are ready (local size check only)	پایگاه‌های GeoIP / GeoSite آماده‌اند (فقط بررسی اندازهٔ محلی)
+数据库检查 / 下载未完成，详情见日志。	Database check or download failed. See the logs.	بررسی یا دریافت پایگاه داده ناموفق بود. گزارش‌ها را ببینید.
+进度条为只读。	The progress bar is read-only.	نوار پیشرفت فقط خواندنی است.
+注册账号	Register account	ثبت حساب
+注册基础账号	Register base account	ثبت حساب پایه
+基础账号就绪，注册 MASQUE	Base account ready; registering MASQUE	حساب پایه آماده است؛ ثبت MASQUE
+基础账号就绪，注册外层账号	Base account ready; registering outer account	حساب پایه آماده است؛ ثبت حساب لایهٔ بیرونی
+注册完成	Registration complete	ثبت کامل شد
+账号已就绪	Account ready	حساب آماده است
+外层	Outer	بیرونی
+内层	Inner	درونی
+检查缓存	Check cache	بررسی حافظهٔ نهان
+检查节点缓存	Check node cache	بررسی حافظهٔ گره‌ها
+准备候选	Prepare candidates	آماده‌سازی گزینه‌ها
+建立外层隧道	Establish outer tunnel	برقراری تونل بیرونی
+初次筛选	Initial screening	غربال اولیه
+验证隧道	Verify tunnel	بررسی تونل
+整理节点	Rank nodes	رتبه‌بندی گره‌ها
+保存缓存	Save cache	ذخیرهٔ حافظهٔ نهان
+读取当前协议缓存	Read cache for this protocol	خواندن دادهٔ ذخیره‌شدهٔ این پروتکل
+整理候选地址与端口	Prepare candidate addresses and ports	آماده‌سازی نشانی‌ها و درگاه‌ها
+等待外层握手与隧道就绪	Wait for the outer handshake and tunnel	انتظار برای دست‌دهی و تونل بیرونی
+按丢包与延迟排序	Rank by loss and latency	رتبه‌بندی بر اساس اتلاف و تأخیر
+写入本地优选缓存	Write local node cache	نوشتن حافظهٔ محلی گره‌ها
+命中 	Cache hit:\s	یافت‌شده در حافظه:\s
+ 个可用节点	 usable nodes	 گرهٔ قابل استفاده
+可用端口	usable ports	درگاه قابل استفاده
+备用端口	Fallback ports	درگاه‌های جایگزین
+探测常用端口	Probe common ports	آزمون درگاه‌های رایج
+补充探测备用端口	Probe fallback ports	آزمون درگاه‌های جایگزین
+完成 	Completed\s	تکمیل‌شده:\s
+ 地址	 addresses	 نشانی
+ 账号	 accounts	 حساب
+ 节点	 nodes	 گره
+可用 	usable:\s	قابل استفاده:\s
+ 端口	 ports	 درگاه
+跳过 	skipped:\s	ردشده:\s
+已验证 	Verified\s	بررسی‌شده:\s
+已达时间预算	Time budget reached	مهلت به پایان رسید
+（已到时间预算）	 (time budget reached)	 (پایان مهلت)
+（预算内结果）	 (within time budget)	 (در مهلت تعیین‌شده)
+优选就绪	Selection ready	انتخاب آماده است
+缓存就绪	Cache ready	حافظهٔ نهان آماده است
+节点已就绪	Nodes ready	گره‌ها آماده‌اند
+内核文件暂时无法访问	Core file is temporarily inaccessible	فایل هسته موقتاً در دسترس نیست
+内核版本读取失败	Could not read the core version	خواندن نسخهٔ هسته ناموفق بود
+不支持或无法验证：	Unsupported or could not verify:\s	پشتیبانی نمی‌شود یا قابل بررسی نیست:\s
+后台可用性检测失败，已断开: 	Background verification failed; disconnected:\s	بررسی پس‌زمینه ناموفق بود؛ اتصال قطع شد:\s
+GeoFiles 缺失或不完整，请在关于页下载；连接中只暂存，断开后替换再重试	GeoFiles are missing or incomplete. Download them in About; staged files are replaced after disconnecting.	فایل‌های GeoFiles مفقود یا ناقص هستند. از بخش «درباره» دریافت کنید؛ پس از قطع اتصال جایگزین می‌شوند.
+请先断开 VPN 再更新内核	Disconnect the VPN before updating the core	پیش از به‌روزرسانی هسته، VPN را قطع کنید
+安装数据初始化失败：	Could not initialize app data:\s	آماده‌سازی داده‌های برنامه ناموفق بود:\s
+数据目录已存在且不属于此安装，未修改原有文件。	The existing data directory does not belong to this installation. It was not changed.	پوشهٔ دادهٔ موجود متعلق به این نصب نیست و تغییر نکرد.
+数据目录不能是符号链接或目录联接。	The data directory must not be a symbolic link or junction.	پوشهٔ داده نباید پیوند نمادین یا اتصال پوشه باشد.
+无法定位本地应用数据目录。	Could not locate the local application data directory.	پوشهٔ محلی داده‌های برنامه یافت نشد.

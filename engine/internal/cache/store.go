@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,6 +24,7 @@ type Store struct {
 	path     string
 	entries  map[string]Entry
 	freshTTL time.Duration
+	scanTTL  *time.Duration
 }
 
 // Entry is one raw, opaque payload plus its freshness metadata. Payload is
@@ -49,6 +51,9 @@ type ScanResult struct {
 type Options struct {
 	Path string // full path of the JSON cache file (defaults to app config dir)
 	TTL  time.Duration
+	// Nil preserves legacy per-entry expiry. Zero explicitly never expires
+	// scan-* entries; positive values age them from their original StoredAt.
+	ScanTTL *time.Duration
 }
 
 // DefaultPath returns the cache file path under the OS config dir, e.g.
@@ -78,7 +83,7 @@ func Open(o Options) (*Store, error) {
 	if ttl <= 0 {
 		ttl = 6 * time.Hour
 	}
-	s := &Store{path: o.Path, entries: map[string]Entry{}, freshTTL: ttl}
+	s := &Store{path: o.Path, entries: map[string]Entry{}, freshTTL: ttl, scanTTL: o.ScanTTL}
 
 	data, err := os.ReadFile(o.Path)
 	if err != nil {
@@ -94,9 +99,9 @@ func Open(o Options) (*Store, error) {
 		return s, nil
 	}
 	for k, e := range entries {
-		if time.Now().Before(e.ExpiresAt) {
-			s.entries[k] = e
-		}
+		// Preserve expired payloads on disk: changing the user's scan lifetime
+		// must not destroy another protocol's cache during an unrelated write.
+		s.entries[k] = e
 	}
 	return s, nil
 }
@@ -106,7 +111,7 @@ func (s *Store) Get(key string) ([]byte, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	e, ok := s.entries[key]
-	if !ok || time.Now().After(e.ExpiresAt) {
+	if !ok || s.expired(key, e) {
 		return nil, false
 	}
 	return e.Payload, true
@@ -121,8 +126,13 @@ func (s *Store) GetTTL(key string) ([]byte, time.Duration, bool) {
 		return nil, 0, false
 	}
 	left := time.Until(e.ExpiresAt)
-	if left <= 0 {
+	if s.expired(key, e) {
 		return nil, 0, false
+	}
+	if expiry := s.expiry(key, e); expiry.IsZero() {
+		left = time.Duration(1<<63 - 1)
+	} else {
+		left = time.Until(expiry)
 	}
 	return e.Payload, left, true
 }
@@ -138,7 +148,37 @@ func (s *Store) PutTTL(key string, payload []byte, ttl time.Duration) error {
 		ttl = s.freshTTL
 	}
 	s.mu.Lock()
-	s.entries[key] = Entry{Payload: payload, StoredAt: time.Now(), ExpiresAt: time.Now().Add(ttl)}
+	e := Entry{Payload: payload, StoredAt: time.Now(), ExpiresAt: time.Now().Add(ttl)}
+	e.ExpiresAt = s.expiry(key, e)
+	s.entries[key] = e
+	s.mu.Unlock()
+	return s.persist()
+}
+
+func (s *Store) expiry(key string, e Entry) time.Time {
+	if s.scanTTL != nil && strings.HasPrefix(key, "scan-") {
+		if *s.scanTTL == 0 {
+			return time.Time{}
+		}
+		return e.StoredAt.Add(*s.scanTTL)
+	}
+	return e.ExpiresAt
+}
+func (s *Store) expired(key string, e Entry) bool {
+	expires := s.expiry(key, e)
+	return !expires.IsZero() && !time.Now().Before(expires)
+}
+
+// Mutating endpoint health must not refresh the age of the underlying scan.
+func (s *Store) Update(key string, payload []byte) error {
+	s.mu.Lock()
+	e, ok := s.entries[key]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("cache entry missing")
+	}
+	e.Payload = payload
+	s.entries[key] = e
 	s.mu.Unlock()
 	return s.persist()
 }
@@ -155,10 +195,9 @@ func (s *Store) Delete(key string) error {
 func (s *Store) Keys() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	now := time.Now()
 	var out []string
 	for k, e := range s.entries {
-		if now.Before(e.ExpiresAt) {
+		if !s.expired(k, e) {
 			out = append(out, k)
 		}
 	}

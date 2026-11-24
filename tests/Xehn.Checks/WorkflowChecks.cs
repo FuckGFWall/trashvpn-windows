@@ -20,9 +20,11 @@ internal static class WorkflowChecks
             old.Emit("progress", phase: "register", done: 1, total: 2);
             check(vm.RegistrationProgress == 50, "registration progress reflects engine units");
             check(vm.IsStatusWorking && !vm.IsPowerWorking && vm.SidebarStatus == "正在检查", "background preparation uses only the small sidebar progress ring");
+            check(vm.IsCheckingNodes, "background node preparation requests the grey-orange pulse");
             var connect = vm.ToggleAsync();
             check(fake.Calls.Count == 1 && vm.CanChangeProtocol, "connect waits for existing preparation without duplicate scan");
-            check(vm.IsPowerWorking && vm.IsStatusWorking, "connection request starts both progress rings while preparing");
+            check(vm.IsPowerWorking && vm.PowerState == PowerButtonState.Connecting && vm.IsStatusWorking, "connection request starts water filling and the small status ring while preparing");
+            check(vm.ConnectionHeading == "正在检查" && vm.SidebarStatus == "正在检查" && vm.IsCheckingNodes, "queued connect does not claim connecting while node preparation is still running");
             vm.Protocol = "wg";
             PumpUntil(() => fake.Calls.Count == 2);
             check(fake.CancelCount == 1 && fake.Last.Protocol == "wg", "protocol switch cancels and starts new snapshot");
@@ -38,10 +40,11 @@ internal static class WorkflowChecks
             fake.Complete();
             PumpUntil(() => fake.Last.Command == "desktop-connect");
             check(fake.Calls.Count == 3 && fake.Last.Protocol == "wg" && fake.Last.Prepared, "pending connect follows latest prepared protocol");
+            check(vm.ConnectionHeading == "正在连接" && vm.SidebarStatus == "正在连接" && !vm.IsCheckingNodes, "actual desktop-connect alone enters the connecting stage");
             check(vm.ScanProgress == 100 && vm.ScanText.Contains("跳过 10"), "preparation retains its final outcome detail");
             fake.Last.Emit("connection", state: "provisional");
             check(vm.IsConnected && vm.Status.Contains("检测中"), "fast mode exposes provisional connection");
-            check(vm.ConnectionHeading == "已连接" && vm.IsPowerWorking, "provisional connection heading stays connected while the ring indicates verification");
+            check(vm.ConnectionHeading == "已连接" && !vm.IsPowerWorking && vm.PowerState == PowerButtonState.Connected, "provisional verification immediately uses the completed power appearance while remaining connected");
             check(vm.SidebarStatus == "已连接" && vm.IsStatusWorking, "provisional sidebar also says connected and retains its progress ring");
             fake.Last.Emit("connection", state: "disconnected");
             check(!vm.IsConnected, "failed background verification immediately retracts connection");
@@ -79,11 +82,111 @@ internal static class WorkflowChecks
             check(fake.MaxConcurrent == 1, "rapid protocol switches serialize engine ownership");
             var stop = vm.StopPreparationAsync(); PumpUntil(() => stop.IsCompleted);
             check(!vm.IsPreparing, "closing cancels background preparation cleanly");
+            PreparationControlChecks(check, output);
+            PreparationPreferenceChecks(check, output);
             DesktopChecks(check, output);
             VersionOneChecks(check, output);
+            InitialVersionChecks(check, output);
             TrafficChecks(check, output);
         }
         finally { SynchronizationContext.SetSynchronizationContext(previous); }
+    }
+    private static void PreparationControlChecks(Action<bool, string> check, string output)
+    {
+        var fake = new FakeEngine(Path.Combine(output, "preparation-controls", Guid.NewGuid().ToString("N")));
+        using var vm = new MainViewModel(fake);
+        vm.InitializePreparation();
+        fake.Last.Progress("register", 1, 2, 1, 7, "注册账号", "1/2 账号");
+        check(Math.Abs(vm.PreparationProgress - 100d / 6) < .001 && vm.PreparationCaption == "1/7 注册账号 · 1/2 账号", "registration uses first third and retains real account counters");
+        fake.Last.Progress("scan", 40, 100, 4, 7, "初次筛选", "3/14 地址");
+        check(vm.RegistrationComplete && vm.PreparationProgress == 60 && vm.PreparationCaption == "4/7 初次筛选 · 3/14 地址" && vm.PreparationActive, "screening uses remaining two thirds and both real levels of progress");
+        var old = fake.Last; var value = vm.PreparationProgress;
+        var pause = vm.TogglePreparationAsync(); PumpUntil(() => pause.IsCompleted);
+        check(!vm.IsPreparing && !vm.PreparationActive && vm.PreparationProgress == value && vm.PreparationActionLabel == "继续" && vm.PreparationCaption.StartsWith("已暂停") && vm.Notice == "", "pause cancels and awaits network work without clearing progress or reporting cancellation as an error");
+        old.Progress("scan", 99, 100, 7, 7, "保存缓存", "old");
+        check(vm.PreparationProgress == value, "cancelled workers cannot overwrite paused progress");
+        vm.TogglePreparationAsync().GetAwaiter().GetResult();
+        check(fake.Calls.Count == 2 && vm.PreparationActive && vm.PreparationProgress == value && fake.MaxConcurrent == 1, "continue reuses serialized preparation and keeps its visual high-water mark");
+        fake.Last.Progress("scan", 10, 100, 2, 7, "检查缓存", "复用已保存账号");
+        check(vm.PreparationProgress == value, "rechecking saved work after continue never sends progress backwards");
+        vm.RestartPreparation(); PumpUntil(() => fake.Calls.Count == 3);
+        var settingsFile=System.IO.Path.Combine(fake.Home,"settings.json");
+        check(fake.Last.Rescan && (!System.IO.File.Exists(settingsFile) || !System.IO.File.ReadAllText(settingsFile).Contains("\"rescan\"")) && vm.PreparationProgress == 0 && fake.MaxConcurrent == 1, "explicit rescan cancels old work without persisting the removed every-connect preference");
+        fake.Fail(); PumpUntil(() => !vm.IsPreparing);
+        check(!vm.PreparationReady && !vm.PreparationActive && vm.PreparationCaption.Contains("未完成") && vm.CanRescan, "failed preparation stays non-green, stops animation and offers rescan");
+        vm.RestartPreparation(); fake.Complete(); PumpUntil(() => !vm.IsPreparing);
+        check(vm.PreparationReady && vm.PreparationProgress == 100 && vm.PreparationCaption == "缓存已就绪" && !vm.CanTogglePreparation && vm.CanRescan, "completed or cached preparation shows only cache-ready text with no step count");
+        vm.RestartPreparation(); var connect = vm.ToggleAsync();
+        check(!vm.CanTogglePreparation && !vm.CanRescan, "queued connection disables preparation actions to avoid cancelling its prerequisite");
+        fake.Complete(); PumpUntil(() => fake.Last.Command == "desktop-connect");
+        check(vm.PreparationReady && !vm.CanRescan, "cached readiness survives core startup while rescan remains disabled");
+        fake.Connected = true; fake.Complete(); PumpUntil(() => connect.IsCompleted);
+        check(!vm.CanRescan && !vm.CanTogglePreparation, "connected client cannot accidentally trigger scan cancellation or rescan");
+    }
+    private static void PreparationPreferenceChecks(Action<bool, string> check, string output)
+    {
+        var fake = new FakeEngine(Path.Combine(output,"preparation-preferences",Guid.NewGuid().ToString("N")));
+        using var vm = new MainViewModel(fake,lanAddressProvider:()=>["192.168.1.20","192.168.1.20","127.0.0.1","::1","10.0.0.3"]);
+        check(vm.CacheDays==1 && !vm.CacheNeverExpires && vm.CanEditCacheDays && !vm.AutoConnectAfterPrepare && vm.LanProxyEndpoints=="", "new preferences default to a one-day finite cache and no automatic post-selection connection");
+        Directory.CreateDirectory(fake.Home);
+        File.WriteAllText(Path.Combine(fake.Home, "settings.json"), """{"auto_connect":true,"auto_repair":false,"cache_days":7}""");
+        var legacy = ClientSettings.Load(fake.Home);
+        check(legacy.CacheDays == 7 && !legacy.AutoConnectAfterPrepare, "older startup/repair toggles are ignored without changing the user's saved cache or preparation preference");
+        check(!JsonSerializer.Serialize(legacy, ClientSettings.JsonOptions).Contains("\"auto_connect\"") && !JsonSerializer.Serialize(legacy, ClientSettings.JsonOptions).Contains("\"auto_repair\""), "retired preferences are not written back");
+        vm.AllowLan=true;
+        check(vm.LanProxyEndpoints=="192.168.1.20:7891\n10.0.0.3:7891", "LAN details show actual injected addresses with proxy port, excluding duplicates and loopback");
+        vm.MixedPort=9090;
+        check(vm.LanProxyEndpoints.Contains(":9090") && ClientSettings.Load(fake.Home).ApiPort!=9090 && vm.Notice=="", "proxy-port changes refresh LAN details and keep the hidden local controller port distinct");
+        vm.AllowLan=false; check(vm.LanProxyEndpoints=="", "turning off LAN sharing clears its addresses");
+        vm.CacheNeverExpires=true; vm.CacheDays=0;
+        check(!vm.CanEditCacheDays && vm.Notice=="", "never-expire preference disables day editing without using its value");
+        vm.CacheDays=7; vm.CacheNeverExpires=false; vm.AutoConnectAfterPrepare=true;
+        var saved=ClientSettings.Load(fake.Home);
+        check(saved.CacheDays==7 && !saved.CacheNeverExpires && saved.AutoConnectAfterPrepare, "cache lifetime and automatic post-selection connection survive settings persistence");
+        vm.InitializePreparation(); fake.Fail(); PumpUntil(()=>!vm.IsPreparing);
+        check(fake.Calls.Count==1, "failed selection cannot trigger automatic connection");
+        vm.RestartPreparation(); fake.Complete(); PumpUntil(()=>fake.Last.Command=="desktop-connect");
+        check(fake.Calls.Count==3 && fake.Last.Prepared && fake.MaxConcurrent==1, "successful selection automatically connects once after releasing the preparation worker");
+        fake.Connected=true; fake.Complete(); PumpUntil(()=>!vm.ConnectionRequested);
+        var disconnect=vm.ToggleAsync(); fake.Connected=false; fake.Complete(); PumpUntil(()=>disconnect.IsCompleted);
+        var count=fake.Calls.Count; PumpUntil(()=>!vm.IsBusy);
+        check(fake.Calls.Count==count && !vm.IsConnected, "manual disconnection does not retrigger the post-selection action");
+        vm.RestartPreparation(); var waiting=vm.ToggleAsync(); fake.Complete(); PumpUntil(()=>fake.Last.Command=="desktop-connect");
+        fake.Connected=true; fake.Complete(); PumpUntil(()=>waiting.IsCompleted);
+        check(fake.Calls.Count==count+2 && vm.IsConnected, "queued manual connect and automatic preference never duplicate or cancel each other");
+        check(LanProxyInfo.Format(["fd12::1","fe80::1%3","0.0.0.0","::","invalid"],1080)=="[fd12::1]:1080" && LanProxyInfo.Format(["127.0.0.1"],1080).Contains("未检测到"), "IPv6-only LAN uses bracketed address while unavailable adapters show an honest empty-network message");
+    }
+    private static void InitialVersionChecks(Action<bool, string> check, string output)
+    {
+        var engine = new FakeEngine(Path.Combine(output, "initial-version", Guid.NewGuid().ToString("N")));
+        var resources = new VersionResources();
+        using var vm = new MainViewModel(engine, new FakeDesktop(), resources);
+        var first = vm.InitializeResourcesAsync(); var second = vm.InitializeResourcesAsync();
+        check(ReferenceEquals(first, second) && resources.Calls == 1 && vm.CoreVersion == "正在读取版本…", "startup shares one pending version read instead of reporting an uninstalled core");
+        resources.Pending.SetResult(new(CoreVersion: "1.19.33")); PumpUntil(() => first.IsCompleted);
+        check(vm.CoreVersion == "v1.19.33" && !vm.CoreResourceSucceeded, "initial resource read displays a healthy core version without a manual protocol check");
+        resources.Info = new(CoreNeedsDownload: true, CoreCheck: "内核版本读取失败");
+        using var transient = new MainViewModel(new FakeEngine(Path.Combine(output, "transient-version", Guid.NewGuid().ToString("N"))), new FakeDesktop(), resources);
+        transient.InitializeResourcesAsync().GetAwaiter().GetResult();
+        check(transient.CoreVersion == "版本暂时无法读取" && !transient.CoreVersion.Contains("未安装"), "a failed version read is not mislabeled as a missing core");
+        resources.Info = new(CoreVersion: "1.19.33"); transient.RunResourceActionAsync("resources-info", false).GetAwaiter().GetResult();
+        check(transient.CoreVersion == "v1.19.33" && !transient.CoreNeedsDownload, "ordinary resource refresh recovers initial version discovery without clicking protocol check");
+        resources.Info = new(CoreNeedsDownload: true, CoreCheck: "未找到内核");
+        using var missing = new MainViewModel(new FakeEngine(Path.Combine(output, "missing-version", Guid.NewGuid().ToString("N"))), new FakeDesktop(), resources);
+        missing.InitializeResourcesAsync().GetAwaiter().GetResult();
+        check(missing.CoreVersion == "未安装" && missing.CoreNeedsDownload, "genuinely absent core still reports uninstalled and exposes download");
+        using var unavailable = new MainViewModel(new FakeEngine(Path.Combine(output, "failed-initial-version", Guid.NewGuid().ToString("N"))), new FakeDesktop(), new FakeResources { FailInfo = true });
+        unavailable.InitializeResourcesAsync().GetAwaiter().GetResult();
+        check(unavailable.CoreVersion == "版本暂时无法读取" && unavailable.CoreResourceDetail.Contains("读取未完成"), "startup worker failure cannot leave the version stuck reading forever");
+    }
+    private sealed class VersionResources : IResourceService
+    {
+        public int Calls;
+        public readonly TaskCompletionSource<ResourceInfo> Pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ResourceInfo Info = new();
+        public Task<ResourceInfo> RunAsync(string command, Action<string> log, Action<ResourceProgress>? progress = null) => ++Calls == 1 ? Pending.Task : Task.FromResult(Info);
+        public Task CancelAsync() => Task.CompletedTask;
+        public void Dispose() { }
     }
 
     private static void TrafficChecks(Action<bool, string> check, string output)
@@ -130,15 +233,49 @@ internal static class WorkflowChecks
         vm.VerifyBeforeConnect = false; vm.GlobalSelected = true;
         modes.Last.Emit("connection", state: "provisional");
         check(vm.IsConnected && vm.SidebarStatus == "已连接" && vm.IsStatusWorking, "fast hot switch keeps connected sidebar wording and verification animation");
+        check(!vm.IsPowerWorking, "provisional hot-switch verification never replaces the power glyph");
         modes.Fail(); PumpUntil(() => vm.ModeChangeTask.IsCompleted);
         check(vm.SplitSelected && vm.Notice.Contains("失败"), "failed hot verification rolls mode back and surfaces failure");
         modes.Verification = "failed"; vm.RefreshAsync().GetAwaiter().GetResult();
         check(vm.Status.Contains("异常") && !vm.Status.Contains("已连接") && !vm.CanChangeModes && vm.CanToggleFromTray, "unverified rollback cannot masquerade as connected and still permits disconnect cleanup");
 
+        foreach (var strict in new[] { false, true })
+        {
+            var modeEngine = NewEngine(); modeEngine.Connected = true;
+            using var modeModel = new MainViewModel(modeEngine, new FakeDesktop());
+            modeModel.RefreshAsync().GetAwaiter().GetResult(); modeModel.VerifyBeforeConnect = strict;
+            foreach (var captureMode in new[] { true, false })
+            {
+                if (captureMode) modeModel.TunSelected = true; else modeModel.ProxySelected = true;
+                check(modeModel.IsStatusWorking && !modeModel.IsPowerWorking, "capture-mode switching starts only the sidebar ring");
+                foreach (var phase in new[] { "verifying", "provisional", "verified" })
+                {
+                    modeEngine.Last.Emit("connection", state: phase);
+                    check(!modeModel.IsPowerWorking && modeModel.IsStatusWorking, "capture-mode " + phase + " cannot start a power ring in either verification policy");
+                }
+                modeEngine.Complete(); PumpUntil(() => modeModel.ModeChangeTask.IsCompleted);
+                check(!modeModel.IsPowerWorking && !modeModel.IsStatusWorking, "capture-mode completion leaves no late busy animation");
+            }
+            modeEngine.Verification = "checking"; modeModel.RefreshAsync().GetAwaiter().GetResult();
+            check(!modeModel.IsPowerWorking && modeModel.IsStatusWorking, "late checking-state polling after a hot switch cannot start the power ring");
+        }
+
+        var locationEngine = NewEngine(); locationEngine.Connected = true; locationEngine.Country = "CN"; locationEngine.Colo = "LAX";
+        using (var location = new MainViewModel(locationEngine, new FakeDesktop()))
+        {
+            location.RefreshAsync().GetAwaiter().GetResult();
+            check(location.Region == "CN" && location.DataCenter == "LAX", "exit country and CF colo are never concatenated");
+            locationEngine.Country = ""; location.RefreshAsync().GetAwaiter().GetResult();
+            check(location.Region == "" && location.DataCenter == "LAX", "unknown exit country does not borrow an airport code as its location");
+            locationEngine.Country = "US"; locationEngine.Colo = ""; location.RefreshAsync().GetAwaiter().GetResult();
+            check(location.Region == "US" && location.DataCenter == "", "unknown data center stays blank without copying the country");
+        }
+
         var network = NewEngine(); var resources = new FakeResources();
         using var model = new MainViewModel(network, new FakeDesktop(), resources);
         model.InitializeResourcesAsync().GetAwaiter().GetResult();
-        check(model.AppVersion == "1.0.0" && model.GeoNeedsDownload && model.GeoUpdated == "2026-10-20", "resource initialization reports version and old GeoFiles date");
+        check(model.AppVersion == "v1.0.0" && model.GeoNeedsDownload && model.GeoUpdated == "2026-10-20", "resource initialization reports version and old GeoFiles date");
+        check(!model.CoreResourceSucceeded && !model.GeoResourceSucceeded, "automatic startup inspection does not advertise a user-requested successful check");
         check(model.GeoResourceMessage.Contains("检查完成") && model.GeoResourceMessage.Contains("下载更新"), "missing / stale GeoFiles check explains the required update in its card");
         network.Connected = true; network.Verification = "checking"; model.RefreshAsync().GetAwaiter().GetResult();
         check(resources.Calls.Count == 1, "automatic GeoFiles never download before verified VPN");
@@ -160,14 +297,17 @@ internal static class WorkflowChecks
         var disconnect = model.ToggleAsync(); network.Connected = false; network.Complete(); PumpUntil(() => disconnect.IsCompleted);
         check(!model.GeoPending && model.GeoUpdated == "2026-10-30" && resources.Calls.Contains("resources-apply"), "disconnect applies staged pair and refreshes date");
         check(model.GeoResourceMessage.Contains("替换成功"), "GeoFiles card confirms actual replacement after disconnect");
+        check(model.GeoResourceSucceeded && model.GeoResourceDetail == "", "actual GeoFiles replacement shows only its success mark");
         model.RunResourceActionAsync("resources-check-core").GetAwaiter().GetResult();
         check(model.CoreNeedsDownload && model.CoreCheckText.Contains("不支持"), "unsupported protocol check exposes core download action");
         check(model.CoreResourceSuccessText == "" && model.CoreResourceDetail.Contains("不支持"), "unsupported-core result cannot retain a stale inline success label");
         model.RunResourceActionAsync("resources-info").GetAwaiter().GetResult();
         check(model.CoreNeedsDownload, "GeoFiles inspection cannot erase an unsupported-core verdict");
         check(model.GeoResourceMessage.Contains("检查通过") && model.GeoResourceMessage.Contains("无需更新"), "successful GeoFiles check gives an explicit card-level confirmation");
+        check(model.GeoResourceSucceeded && model.GeoResourceDetail == "" && model.Notice == "", "manual GeoFiles success uses a checkmark instead of persistent visible text");
         resources.FailInfo = true; model.RunResourceActionAsync("resources-info").GetAwaiter().GetResult();
         check(model.GeoResourceMessage.Contains("检查未完成") && !model.GeoResourceMessage.Contains("检查通过"), "failed GeoFiles check replaces any stale successful-check message");
+        check(!model.GeoResourceSucceeded, "failed GeoFiles check cannot retain a green mark");
         resources.FailInfo = false;
         network.Connected = true; model.RefreshAsync().GetAwaiter().GetResult(); var count = resources.Calls.Count;
         model.RunResourceActionAsync("resources-download-core").GetAwaiter().GetResult();
@@ -182,10 +322,16 @@ internal static class WorkflowChecks
         resources.EmitProgress(new("core", "validate", "", 0, 0));
         check(!model.CoreDownloadActive && !model.CanToggleFromTray && model.CoreResourceMessage.Contains("校验"), "core validation keeps the install lock but no download bar");
         resources.CompleteCoreDownload(); PumpUntil(() => coreDownload.IsCompleted);
-        check(model.CoreVersion == "9.0.0" && !model.CoreNeedsDownload, "validated core install refreshes displayed version");
+        check(model.CoreVersion == "v9.0.0" && !model.CoreNeedsDownload, "validated core install refreshes displayed version");
         check(model.CoreResourceMessage.Contains("成功") && !model.CoreDownloadActive, "core card confirms successful install / replacement");
+        check(model.CoreResourceSucceeded && model.CoreResourceDetail == "", "validated core replacement has its own transient success mark");
         resources.CoreSupported = true; model.RunResourceActionAsync("resources-check-core").GetAwaiter().GetResult();
         check(model.CoreResourceSuccessText == "检查通过" && model.CoreResourceDetail == "", "successful core inspection also appears only inline with its buttons");
+        check(model.CoreResourceSucceeded, "manual supported-core check enables its success mark");
+        var geoFailure = model.GeoResourceDetail; model.ClearResourceSuccess();
+        check(!model.CoreResourceSucceeded && !model.GeoResourceSucceeded && model.CoreResourceDetail == "" && model.GeoResourceDetail == geoFailure, "fresh About visit clears success markers without exposing old successes or discarding an unresolved failure");
+        resources.SetCoreVersion("v9.0.0"); model.RunResourceActionAsync("resources-check-core").GetAwaiter().GetResult();
+        check(model.CoreVersion == "v9.0.0", "already-prefixed core version never receives a duplicate v");
 
         var retryEngine = NewEngine(); var retryResources = new FakeResources { FailDownload = true };
         using var retry = new MainViewModel(retryEngine, new FakeDesktop(), retryResources);
@@ -211,6 +357,7 @@ internal static class WorkflowChecks
         check(!apply.CanToggleFromTray, "offline GeoFiles download / replacement prevents a competing connection");
         applyResources.CompleteDownload(); PumpUntil(() => applyDownload.IsCompleted);
         check(apply.GeoPending && apply.GeoResourceMessage.Contains("已下载") && apply.GeoResourceMessage.Contains("替换未完成") && !apply.GeoResourceMessage.Contains("成功"), "replacement failure distinguishes completed staging from failed installation");
+        check(!apply.GeoResourceSucceeded, "failed replacement does not display the success checkmark");
 
         var cancelEngine = NewEngine(); var cancelResources = new FakeResources();
         using var cancel = new MainViewModel(cancelEngine, new FakeDesktop(), cancelResources);
@@ -251,6 +398,7 @@ internal static class WorkflowChecks
         }
         public void CompleteDownload() { current = current with { GeoPending = true }; download!.SetResult(current); }
         public void SetGeoAge(bool due) { current = current with { GeoNeedsDownload = due }; }
+        public void SetCoreVersion(string value) { current = current with { CoreVersion = value }; }
         public void CompleteCoreDownload() { current = current with { CoreVersion = "9.0.0", CoreNeedsDownload = false }; coreDownload!.SetResult(current); }
         public void EmitProgress(ResourceProgress value) => progress?.Invoke(value);
         public Task CancelAsync() { CancelCount++; download?.TrySetCanceled(); coreDownload?.TrySetCanceled(); return Task.CompletedTask; }
@@ -408,6 +556,7 @@ internal static class WorkflowChecks
         private int concurrent;
         public bool Connected;
         public string Verification = "verified";
+        public string Country = "", Colo = "";
         public int SessionId;
         public double Up, Down;
         public bool FailTraffic;
@@ -425,7 +574,7 @@ internal static class WorkflowChecks
         }
         public void Complete() => Last.Finished.TrySetResult();
         public void Fail() => Last.Finished.TrySetException(new IOException("simulated verification failure"));
-        public Task<Session> ReadSessionAsync() => PendingRead?.Task ?? Task.FromResult(new Session(Connected, Started: "fixture-" + SessionId, Verification: Verification));
+        public Task<Session> ReadSessionAsync() => PendingRead?.Task ?? Task.FromResult(new Session(Connected, Country: Country, Colo: Colo, Started: "fixture-" + SessionId, Verification: Verification));
         public Task<(double Up, double Down)> TrafficAsync(int port) => FailTraffic ? Task.FromException<(double, double)>(new IOException("fixture traffic unavailable")) : Task.FromResult((Up, Down));
         public void Dispose() { }
     }
@@ -433,11 +582,13 @@ internal static class WorkflowChecks
     {
         public string Command => command;
         public bool Prepared => prepared;
+        public bool Rescan { get { using var doc=JsonDocument.Parse(settings); return doc.RootElement.TryGetProperty("rescan",out var value) && value.GetBoolean(); } }
         public string Protocol => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.Proto;
         public string Capture => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.CaptureMode;
         public string Route => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.ProxyMode;
         public bool VerifyBeforeConnect => JsonSerializer.Deserialize<ClientSettings>(settings, ClientSettings.JsonOptions)!.VerifyBeforeConnect;
         public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Emit(string type, string phase = "", string state = "", int done = 0, int total = 0, string text = "test") => log("@@XEHN " + JsonSerializer.Serialize(new { type, phase, state, done, total, text }));
+        public void Progress(string phase, int done, int total, int step, int steps, string operation, string detail) => log("@@XEHN " + JsonSerializer.Serialize(new { type = "progress", phase, done, total, step, steps, operation, detail, text = operation + " · " + detail }));
     }
 }

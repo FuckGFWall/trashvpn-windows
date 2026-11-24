@@ -233,6 +233,19 @@ func optionsFromState(st clientState) options {
 	// it needs its outer endpoint, which the state does not carry, so a chain
 	// is repaired by a fresh pick rather than reproduced here.
 	opts := defaultConnectOptions(proto, st.TUN, false)
+	if st.Verification == "verified" && !st.PsiphonMode && !st.OpenVPNMode {
+		// Keep the desktop DNS/cache/routing policy after rotating endpoints.
+		// Connection identity still comes from the running session below.
+		s := loadSettings()
+		s.Proto, s.Rescan = proto, false
+		if s.ProxyMode != modeBypass {
+			s.ProxyMode = modeGlobal
+		}
+		opts = desktopConnectOptions(s)
+		opts.guardRepair, opts.optimistic = true, false
+		opts.pick = ""
+		opts.tunMode, opts.noProxy = st.TUN, st.NoProxy
+	}
 	opts.mixedPort = st.MixedPort
 	opts.apiPort = st.APIPort
 	if opts.mixedPort == 0 {
@@ -420,12 +433,13 @@ func repairOnce(ctx context.Context, opts options, dead string, tried map[string
 		// user to click away; without this check the repair would bring a core
 		// back up afterwards and point the host at a proxy the user just
 		// switched off.
-		if prev, serr := loadState(); serr == nil && !prev.Connected {
+		prev, serr := loadState()
+		if serr == nil && !prev.Connected {
 			logf("会话已断开，中止修复")
 			return clientState{}, false
 		}
 		logf(fmt.Sprintf("切换端点 %s（第 %d/%d 个）…", ce.Endpoint, i+1, len(cands)))
-		if prev, serr := loadState(); serr == nil {
+		if serr == nil {
 			if kerr := stopRecordedCore(prev); kerr != nil {
 				logf(fmt.Sprintf("停止旧核心失败: %v", kerr))
 			}
@@ -507,6 +521,14 @@ func repairOnce(ctx context.Context, opts options, dead string, tried map[string
 				state.PsiphonMode = true
 				state.PsiphonPID = ps.PID()
 				state.PsiphonSocksPort = psPort
+			}
+			if opts.guardRepair {
+				state.Verification = "verified"
+				// Re-capturing an already-set system proxy must not turn
+				// the old VPN proxy into the baseline restored on exit.
+				if !state.TUN && len(prev.ProxySnap) > 0 {
+					state.ProxySnap = prev.ProxySnap
+				}
 			}
 			if saveState(state) != nil {
 				logf("状态保存失败")

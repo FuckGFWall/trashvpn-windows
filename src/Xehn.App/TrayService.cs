@@ -15,6 +15,8 @@ public sealed class TrayService : IDisposable
     private readonly MainViewModel model;
     private readonly ContextMenu menu = new();
     private readonly MenuItem connection = new();
+    private readonly MenuItem display = new();
+    private readonly MenuItem quit = new();
     private readonly Forms.NotifyIcon icon;
     private readonly Icon artwork;
     public ContextMenu ContextMenu => menu;
@@ -25,9 +27,9 @@ public sealed class TrayService : IDisposable
         artwork = new Icon(stream, new System.Drawing.Size(32, 32));
         menu.Style = (Style)Application.Current.FindResource("TrayContextMenu");
         menu.ItemContainerStyle = (Style)Application.Current.FindResource("TrayMenuItem");
-        var display = new MenuItem { Header = "显示主界面" }; display.Click += (_, _) => show();
+        display.Click += (_, _) => show();
         connection.Click += async (_, _) => { if (model.CanToggleFromTray) await model.ToggleAsync(); };
-        var quit = new MenuItem { Header = "退出" }; quit.Click += async (_, _) => await exit();
+        quit.Click += async (_, _) => await exit();
         menu.Items.Add(display); menu.Items.Add(connection); menu.Items.Add(quit);
         icon = new Forms.NotifyIcon { Icon = artwork, Text = "XEHN", Visible = visible };
         icon.MouseClick += (_, e) =>
@@ -47,6 +49,7 @@ public sealed class TrayService : IDisposable
             menu.Focus();
         };
         model.PropertyChanged += Update;
+        Localization.Current.PropertyChanged += Update;
         App.ThemeChanged += RefreshTheme;
         RefreshTheme();
         Update(null, new(""));
@@ -63,13 +66,17 @@ public sealed class TrayService : IDisposable
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     private void Update(object? sender, PropertyChangedEventArgs e)
     {
-        connection.Header = model.TrayConnectionLabel;
+        menu.FlowDirection = Localization.Current.Direction;
+        display.Header = Localization.Text("显示主界面");
+        quit.Header = Localization.Text("退出");
+        connection.Header = Localization.Text(model.TrayConnectionLabel);
         connection.IsEnabled = model.CanToggleFromTray;
-        icon.Text = "XEHN · " + model.Status;
+        var description = "XEHN · " + Localization.Text(model.Status);
+        icon.Text = description[..Math.Min(description.Length, 63)];
     }
     public void Dispose()
     {
-        model.PropertyChanged -= Update; App.ThemeChanged -= RefreshTheme; menu.IsOpen = false;
+        model.PropertyChanged -= Update; Localization.Current.PropertyChanged -= Update; App.ThemeChanged -= RefreshTheme; menu.IsOpen = false;
         icon.Visible = false; icon.Dispose(); artwork.Dispose();
     }
 }

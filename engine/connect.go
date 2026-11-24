@@ -211,7 +211,7 @@ func runConnectCmd(ctx context.Context, opts options) error {
 		}
 		if opts.through == "" {
 			stageMsg(fmt.Sprintf("[%s] 选择外层端点…", label))
-			if _, ok := cachedScanFor(opts.outerProto, opts.ipv6); !ok {
+			if _, ok := cachedScanFor(opts.outerProto, opts.ipv6, opts); !ok {
 				stageMsg(fmt.Sprintf("[%s] 外层端点无缓存，先扫描外层（约 1-2 分钟）…", label))
 			}
 			endpoint, err := pickOuterEndpoint(ctx, opts)
@@ -237,7 +237,7 @@ func runConnectCmd(ctx context.Context, opts options) error {
 	// the silence so the click does not look dead.
 	if opts.scanNow {
 		stageMsg(fmt.Sprintf("[%s] 重新优选端点，请稍候…", label))
-	} else if _, ok := cachedScanFor(scanKeyFor(opts), opts.ipv6); !ok {
+	} else if _, ok := cachedScanFor(scanKeyFor(opts), opts.ipv6, opts); !ok {
 		stageMsg(fmt.Sprintf("[%s] 尚无有效端点缓存，开始优选…", label))
 	}
 	stageMsg(fmt.Sprintf("[%s] 扫描 WARP 端点…", label))
@@ -402,13 +402,8 @@ func runConnectCmd(ctx context.Context, opts options) error {
 			// of ours is left to notice the moment the endpoint stops passing
 			// traffic - the "connected, nothing loads" state this whole file
 			// exists to prevent. Whichever frontend started it, the session
-			// gets one watcher; ensureSessionGuard is idempotent, and the GUI
-			// takes ownership of its own sessions from its status loop.
-			// The settings page's "auto repair" switch is the one way out: with
-			// it off the session simply is not watched.
-			if !opts.noGuard {
-				ensureSessionGuard(state)
-			}
+			// gets one watcher; ensureSessionGuard is idempotent.
+			ensureSessionGuard(state)
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -597,9 +592,7 @@ func runConnectPsiphon(ctx context.Context, opts options) error {
 			// outlives this process and needs exactly one watcher. The guard is
 			// Psiphon-aware: it repairs a Psiphon session by restarting Psiphon,
 			// never by rotating the underlay (see psiphon_health.go).
-			if !opts.noGuard {
-				ensureSessionGuard(state)
-			}
+			ensureSessionGuard(state)
 			return nil
 		}
 		lastErr = serr
@@ -788,9 +781,7 @@ func runConnectOpenVPN(ctx context.Context, opts options) error {
 				if opts.tunMode {
 					fmt.Fprintln(os.Stderr, errPal.warn("TUN mode requires running with administrator rights"))
 				}
-				if !opts.noGuard {
-					ensureSessionGuard(state)
-				}
+				ensureSessionGuard(state)
 				return nil
 			}
 			lastErr = serr
@@ -1193,7 +1184,9 @@ func startAndVerify(ctx context.Context, opts options, ce cachedEndpoint, run pr
 
 	// Legacy exit overlays keep their separate sidecar / relay-speed lifecycle.
 	// The desktop UI exposes the six native WARP protocols, not these exits.
-	if opts.desktop && !opts.psiphonMode && !opts.openvpnMode {
+	// The guard must not persist a replacement before checking that a
+	// concurrent disconnect hasn't ended the session it is repairing.
+	if opts.desktop && !opts.guardRepair && !opts.psiphonMode && !opts.openvpnMode {
 		state, verifyErr := verifyDesktopSession(ctx, desktopSessionState(opts, ce, run, c.PID()), opts.optimistic, desktopSessionOps{
 			verify: func(ctx context.Context, usable func(clientState) error) (clientState, error) {
 				return verifyDesktopConnection(ctx, opts, func(msg string) { stageMsg(fmt.Sprintf("[%s] %s", label, msg)) }, usable)
@@ -1357,7 +1350,7 @@ func startAndVerify(ctx context.Context, opts options, ce cachedEndpoint, run pr
 // again. Endpoints CF has silenced for this network only recover on a fresh
 // scan, which is also the only thing that un-does the mark.
 func markEndpointDead(opts options, ce cachedEndpoint) {
-	store, err := cache.Open(cache.Options{TTL: scanTTL})
+	store, err := cache.Open(scanCacheOptions(opts))
 	if err != nil {
 		return
 	}
@@ -1384,7 +1377,7 @@ func markEndpointDead(opts options, ce cachedEndpoint) {
 		return
 	}
 	if raw, err := json.Marshal(cs); err == nil {
-		_ = store.Put(key, raw)
+		_ = store.Update(key, raw)
 	}
 }
 
@@ -1580,7 +1573,7 @@ func runStatusCmd(ctx context.Context, opts options) error {
 
 // runListCmd prints the cached scan results for the selected protocol.
 func runListCmd(ctx context.Context, opts options) error {
-	store, err := cache.Open(cache.Options{TTL: scanTTL})
+	store, err := cache.Open(scanCacheOptions(opts))
 	if err != nil {
 		return err
 	}

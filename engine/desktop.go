@@ -42,6 +42,9 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 	ctx, cancel := desktopContext(parent)
 	defer cancel()
 	s := loadSettings()
+	// Removed desktop preference: only an explicit per-operation rescan
+	// request from the home button may force a sweep now.
+	s.Rescan = false
 	if raw := os.Getenv("WARP_DESKTOP_SETTINGS"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &s); err != nil {
 			return fmt.Errorf("desktop settings: %w", err)
@@ -59,8 +62,7 @@ func runDesktopOperation(parent context.Context, prepare bool) error {
 	previousStage := connectStage
 	connectStage = func(s string) { fmt.Println(s) }
 	desktopEvents = true
-	desktopScan = &scanProgressTracker{chain: s.Proto == protoWWarp || s.Proto == protoMASQUEMASQUE,
-		send: func(e map[string]any) { desktopEvent(e) }}
+	desktopScan = newScanProgressTracker(s, func(e map[string]any) { desktopEvent(e) })
 	defer func() { connectStage = previousStage; desktopScan = nil; desktopEvents = false }()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -142,6 +144,9 @@ func desktopConnectOptions(s clientSettings) options {
 	o := defaultConnectOptions(s.Proto, s.CaptureMode == captureTun, s.Rescan)
 	s.apply(&o)
 	o.desktop = true
+	if o.dns == "" {
+		o.dns = tunnelDNS
+	}
 	o.optimistic = !s.VerifyBeforeConnect
 	applyScanIntensity(&o, s.ScanIntensity)
 	o.pick = s.Pin

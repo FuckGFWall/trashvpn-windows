@@ -20,7 +20,7 @@ public static class WindowPresentation
             Math.Clamp(top, workArea.Top + margin, workArea.Bottom - margin - height), width, height);
     }
 
-    public static void FitToWorkArea(Window window, bool center, double? fixedWidth = null)
+    public static void FitToWorkArea(Window window, bool center, double? fixedWidth = null, double? fixedHeight = null)
     {
         if (window.WindowState != WindowState.Normal) return;
         var handle = new WindowInteropHelper(window).Handle;
@@ -30,7 +30,7 @@ public static class WindowPresentation
         var scale = GetDpiForWindow(handle) / 96d;
         if (scale <= 0) scale = 1;
         var bounds = FitBounds(new Rect(info.Work.Left, info.Work.Top, info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top),
-            new Size(fixedWidth ?? window.Width, window.Height), scale, center ? null : new Point(current.Left, current.Top));
+            new Size(fixedWidth ?? window.Width, fixedHeight ?? window.Height), scale, center ? null : new Point(current.Left, current.Top));
         window.WindowStartupLocation = WindowStartupLocation.Manual;
         if (fixedWidth.HasValue)
         {
@@ -41,7 +41,13 @@ public static class WindowPresentation
             window.MinWidth = window.MaxWidth;
         }
         else window.MinWidth = Math.Min(window.MinWidth, bounds.Width / scale);
-        window.MinHeight = Math.Min(window.MinHeight, bounds.Height / scale);
+        if (fixedHeight.HasValue)
+        {
+            window.MinHeight = 0;
+            window.MaxHeight = bounds.Height / scale;
+            window.MinHeight = window.MaxHeight;
+        }
+        else window.MinHeight = Math.Min(window.MinHeight, bounds.Height / scale);
         window.Width = bounds.Width / scale; window.Height = bounds.Height / scale;
         SetWindowPos(handle, 0, (int)Math.Round(bounds.Left), (int)Math.Round(bounds.Top),
             (int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), 0x14); // NOZORDER | NOACTIVATE
@@ -51,8 +57,8 @@ public static class WindowPresentation
     {
         var handle = new WindowInteropHelper(window).Handle;
         if (handle == 0) return;
-        // Keep the native minimize button and vertical resizing border. Only
-        // remove maximize capability; WPF's CanMinimize would lock height too.
+        // Preserve the native minimize button. ResizeMode decides whether the
+        // frame can resize; the main client now uses a fixed size on both axes.
         SetWindowLong(handle, -16, GetWindowLong(handle, -16) & ~0x10000); // WS_MAXIMIZEBOX
         EnableMenuItem(GetSystemMenu(handle, false), 0xF030, 1); // SC_MAXIMIZE, MF_GRAYED
         var source = HwndSource.FromHwnd(handle);

@@ -6,6 +6,7 @@ public sealed class ClientSettings
 {
     public string Proto { get; set; } = "awg";
     public string Theme { get; set; } = "light";
+    public string? Language { get; set; }
     public string CaptureMode { get; set; } = "proxy";
     public string ProxyMode { get; set; } = "global";
     public string IpFamily { get; set; } = "v4";
@@ -16,11 +17,11 @@ public sealed class ClientSettings
     public int Mtu { get; set; }
     public int TimeoutSec { get; set; } = 2;
     public bool AllowLan { get; set; }
-    public bool AutoConnect { get; set; }
+    public bool AutoConnectAfterPrepare { get; set; }
+    public bool CacheNeverExpires { get; set; }
+    public int CacheDays { get; set; } = 1;
     public bool CloseToTray { get; set; } = true;
     public bool AutoStart { get; set; }
-    public bool AutoRepair { get; set; } = true;
-    public bool Rescan { get; set; }
     public bool VerifyBeforeConnect { get; set; }
     public string ScanIntensity { get; set; } = "medium";
     public string DnsCustom { get; set; } = "";
@@ -28,6 +29,7 @@ public sealed class ClientSettings
     public bool DnsOff { get; set; }
     public string Validate()
     {
+        if (!CacheNeverExpires && CacheDays is < 1 or > 36500) return "缓存有效期需在 1–36500 天之间。";
         if (!new[] { "low", "medium", "high" }.Contains(ScanIntensity)) return "未知的优选强度。";
         if (MixedPort is < 1024 or > 65535 || ApiPort is < 1024 or > 65535) return "端口需在 1024–65535 之间。";
         if (MixedPort == ApiPort) return "代理端口与 API 端口不能相同。";

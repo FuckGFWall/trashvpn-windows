@@ -19,21 +19,132 @@ type scanProgressTracker struct {
 	label, text         string
 	last                scanProgressMsg
 	send                func(map[string]any)
+	plan                []preparationStep
+}
+
+type preparationStep struct {
+	segment     int
+	stage, name string
+}
+
+// Alternate ports are a second pass of initial screening, not another major
+// step. MASQUE has no WireGuard port screening. A chain has two real scans.
+func newScanProgressTracker(s clientSettings, send func(map[string]any)) *scanProgressTracker {
+	p := &scanProgressTracker{chain: protoChained(s.Proto), send: send,
+		plan: []preparationStep{{0, "register", "注册账号"}}}
+	protocols := []string{s.Proto}
+	if s.Proto == protoWWarp {
+		protocols = []string{s.OuterProto, s.InnerProto}
+	}
+	if s.Proto == protoMASQUEMASQUE {
+		protocols = []string{protoMASQUE, protoMASQUE}
+	}
+	for i, proto := range protocols {
+		prefix := ""
+		if p.chain {
+			if i == 0 {
+				prefix = "外层"
+			} else {
+				prefix = "内层"
+			}
+		}
+		add := func(stage, name string) { p.plan = append(p.plan, preparationStep{i + 1, stage, prefix + name}) }
+		add("cache-check", "检查缓存")
+		add("start", "准备候选")
+		if i > 0 {
+			add("outer-dial", "建立外层隧道")
+		}
+		if proto == protoWG || proto == protoAWG {
+			add("ports-primary", "初次筛选")
+		}
+		add("verify", "验证隧道")
+		add("rank", "整理节点")
+		add("cache-write", "保存缓存")
+	}
+	return p
+}
+
+func (p *scanProgressTracker) describe(e map[string]any, stage, detail string) {
+	if stage == "ports-alternate" {
+		stage = "ports-primary"
+	}
+	if stage == "cached" {
+		stage = "cache-check"
+	}
+	for i, step := range p.plan {
+		if step.stage == stage && (stage == "register" || step.segment == p.segment) {
+			e["step"], e["steps"], e["operation"], e["detail"] = i+1, len(p.plan), step.name, detail
+			return
+		}
+	}
+}
+
+func (p *scanProgressTracker) registration(text string, done, total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// doScan re-checks already loaded credentials. It is not another enrolment
+	// and must not send the dashboard back to major step 1 mid-scan.
+	if p.segment > 0 && total > 0 && done >= total {
+		return
+	}
+	e := map[string]any{"type": "progress", "phase": "register", "text": text, "done": done, "total": total}
+	detail := text
+	if total > 0 && done < total {
+		detail = fmt.Sprintf("%d/%d 账号 · %s", done, total, text)
+	}
+	p.describe(e, "register", detail)
+	p.send(e)
 }
 
 func (p *scanProgressTracker) publish(fraction float64, text string) {
 	p.percent = math.Max(p.percent, p.start+(p.end-p.start)*fraction)
 	p.text = text
-	p.send(map[string]any{"type": "progress", "phase": "scan", "text": text,
+	e := map[string]any{"type": "progress", "phase": "scan", "text": text,
 		"done": p.percent, "total": 100, "stage": p.last.stage,
 		"completed": p.last.completed, "succeeded": p.last.succeeded, "skipped": p.last.skipped,
-		"candidates": p.last.total, "target": p.last.target})
+		"candidates": p.last.total, "target": p.last.target}
+	detail := text
+	switch p.last.stage {
+	case "cache-check":
+		detail = "读取当前协议缓存"
+	case "start":
+		detail = "整理候选地址与端口"
+	case "outer-dial":
+		detail = "等待外层握手与隧道就绪"
+	case "rank":
+		detail = "按丢包与延迟排序"
+	case "cache-write":
+		detail = "写入本地优选缓存"
+	case "cached":
+		detail = fmt.Sprintf("命中 %d 个可用节点", p.last.succeeded)
+	case "ports-primary", "ports-alternate":
+		detail = fmt.Sprintf("%d/%d 地址 · %d 可用端口", p.last.completed, p.last.total, p.last.succeeded)
+		if p.last.stage == "ports-alternate" {
+			detail = "备用端口 · " + detail
+		}
+	case "verify":
+		detail = fmt.Sprintf("%d/%d 节点 · 可用 %d", p.last.completed, p.last.total, p.last.succeeded)
+		if p.last.target > 0 {
+			detail += fmt.Sprintf("/%d", p.last.target)
+		}
+		if p.last.skipped > 0 {
+			detail += fmt.Sprintf(" · 跳过 %d", p.last.skipped)
+		}
+		if p.last.budgetReached {
+			detail += " · 已达时间预算"
+		}
+	}
+	p.describe(e, p.last.stage, detail)
+	p.send(e)
 }
 
-func (p *scanProgressTracker) begin(proto string) {
+func (p *scanProgressTracker) begin(proto string, layer ...int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.segment++
+	if len(layer) > 0 {
+		p.segment = layer[0]
+	}
 	p.start, p.end = p.percent, 99
 	p.label = ""
 	if p.chain {
@@ -128,9 +239,13 @@ func (p *scanProgressTracker) finish() {
 	p.publish(1, text)
 }
 
-func desktopScanBegin(proto string) {
+func desktopScanBegin(opts options) {
 	if desktopScan != nil {
-		desktopScan.begin(proto)
+		layer, proto := 1, opts.proto
+		if desktopScan.chain && opts.through != "" {
+			layer, proto = 2, opts.innerProto
+		}
+		desktopScan.begin(proto, layer)
 	}
 }
 func desktopScanNote(stage, text string) {
